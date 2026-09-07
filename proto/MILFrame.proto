@@ -1,0 +1,315 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/any.proto";
+import "CommonTypes.proto";
+import "WaveformTypes.proto";
+import "google/protobuf/descriptor.proto";
+package MIL;
+option csharp_namespace = "Prodigy.Protos.MIL";
+
+/* MIL-STD-1553B command/response multiplex data bus.
+   Words are 20 bit times: 3-bit sync + 16-bit information + odd parity.
+   Message traffic is command, status, and data words as defined in 4.3.3.5. */
+
+message Configuration_MIL {
+    int32 Id = 1;
+
+    /* Primary / Bus A capture channel */
+    CommonTypes.Channels ChannelIndex_BusA = 2;
+
+    /* Optional redundant Bus B capture channel (dual standby, 4.6) */
+    optional CommonTypes.Channels ChannelIndex_BusB = 3;
+
+    /* Keyed by unique RT address 0-30. Address 31 is broadcast and is not assigned. */
+    map<int32, MILRemoteTerminalInfo> RemoteTerminals = 4;
+
+    bool EnableBroadcast = 5;
+    bool EnableModeCodes = 6;
+    bool EnableInstrumentationBit = 7;
+    bool EnableDynamicBusControl = 8;
+
+    /* Nominal bit rate is 1.0 Mb/s per 4.3.3.3 */
+    double BitRateHz = 9;
+}
+
+message MILRemoteTerminalInfo {
+    TerminalType TerminalType = 1;
+    int32 Address = 2;
+    int32 NodeId = 3;
+    bool SupportsBroadcast = 4;
+    bool SupportsModeCodes = 5;
+    bool SupportsDynamicBusControl = 6;
+    string Name = 7;
+}
+
+/* Command word (4.3.3.5.1):
+   RT address (5) | T/R (1) | subaddress/mode (5) | word count/mode code (5) | P */
+message CommandFrame {
+    uint32 CommandValue = 1;
+    PacketType PacketType = 2;
+    ProtocolMode ProtocolMode = 3;
+    HostDeviceType HostDevice = 4;
+    BusChannel BusChannel = 5;
+    ErrorType ErrorType = 6;
+    ParityType Parity = 7;
+    SyncType SyncType = 8;
+
+    uint32 RTAddress = 9;
+    TransmitReceiveType TransmitReceive = 10;
+    uint32 SubaddressMode = 11;
+    uint32 WordCountOrModeCode = 12;
+
+    /* True when SubaddressMode is 0 or 31 */
+    bool IsModeCommand = 13;
+
+    /* True when RTAddress is 31 (11111) */
+    bool IsBroadcast = 14;
+
+    /* Decoded word count: encoded 0 means 32 data words */
+    uint32 WordCount = 15;
+
+    ModeCode ModeCode = 16;
+
+    CommonTypes.MessageInterval CommandInterval = 17;
+    CommonTypes.MessageInterval SyncInterval = 18;
+    CommonTypes.MessageInterval ParityInterval = 19;
+}
+
+/* Status word (4.3.3.5.3). Broadcast responses suppress this word. */
+message StatusFrame {
+    uint32 StatusValue = 1;
+    PacketType PacketType = 2;
+    ProtocolMode ProtocolMode = 3;
+    HostDeviceType HostDevice = 4;
+    BusChannel BusChannel = 5;
+    ErrorType ErrorType = 6;
+    ParityType Parity = 7;
+    SyncType SyncType = 8;
+
+    uint32 RTAddress = 9;
+    bool MessageError = 10;
+    bool Instrumentation = 11;
+    bool ServiceRequest = 12;
+
+    /* Bits 12-14 must be zero when unused */
+    uint32 ReservedBits = 13;
+
+    bool BroadcastCommandReceived = 14;
+    bool Busy = 15;
+    bool SubsystemFlag = 16;
+    bool DynamicBusControlAcceptance = 17;
+    bool TerminalFlag = 18;
+
+    CommonTypes.MessageInterval StatusInterval = 19;
+    CommonTypes.MessageInterval SyncInterval = 20;
+    CommonTypes.MessageInterval ParityInterval = 21;
+}
+
+/* Data word (4.3.3.5.2). Maximum 32 data words per message. */
+message DataFrame {
+    uint32 DataValue = 1;
+    PacketType PacketType = 2;
+    ProtocolMode ProtocolMode = 3;
+    HostDeviceType HostDevice = 4;
+    BusChannel BusChannel = 5;
+    DataDescription Description = 6;
+    ErrorType ErrorType = 7;
+    ParityType Parity = 8;
+    SyncType SyncType = 9;
+    uint32 WordIndex = 10;
+
+    CommonTypes.MessageInterval DataInterval = 11;
+    CommonTypes.MessageInterval SyncInterval = 12;
+    CommonTypes.MessageInterval ParityInterval = 13;
+}
+
+/* Intermessage gap (minimum 4 us) */
+message GapFrame {
+    GapType GapType = 1;
+    CommonTypes.MessageInterval GapInterval = 2;
+}
+
+/* RT response time (4-12 us typical, no-response after 14 us) */
+message ResponseFrame {
+    ResponseType ResponseType = 1;
+    CommonTypes.MessageInterval ResponseInterval = 2;
+}
+
+message ExtendedFrame_MIL {
+    MessageType Message = 1;
+    ErrorType Error = 2;
+    double BitRateHz = 3;
+    BusChannel BusChannel = 4;
+    int32 Device = 6;
+    uint32 WordCount = 7;
+    bool IsBroadcast = 8;
+    ModeCode ModeCode = 9;
+
+    repeated PacketMIL Packets = 5;
+}
+
+message PacketMIL {
+    oneof Packet {
+        CommandFrame Command = 1;
+        StatusFrame Status = 2;
+        DataFrame Data = 3;
+        GapFrame Gap = 4;
+        ResponseFrame Response = 5;
+    }
+}
+
+enum PacketType {
+    Command = 0;
+    Status = 1;
+    Data = 2;
+    Gap = 3;
+    Response = 4;
+    MILPacketType_Unknown = 5;
+}
+
+/* Information-transfer formats in 4.3.3.6 / figures 6 and 7 */
+enum MessageType {
+    BC_to_RT = 0;
+    RT_to_BC = 1;
+    RT_to_RT = 2;
+    ModeCommand_WithoutData = 3;
+    ModeCommand_WithData_Transmit = 4;
+    ModeCommand_WithData_Receive = 5;
+    Broadcast_BC_to_RT = 6;
+    Broadcast_RT_to_RT = 7;
+    Broadcast_ModeCommand_WithoutData = 8;
+    Broadcast_ModeCommand_WithData = 9;
+    MessageType_Unknown = -1;
+}
+
+enum HostDeviceType {
+    HostDeviceType_NA = 0;
+    BUS_CONTROLLER = 1;
+    REMOTE_TERMINAL = 2;
+    BUS_MONITOR = 3;
+}
+
+enum TerminalType {
+    TerminalType_RT = 0;
+    TerminalType_BC = 1;
+    TerminalType_BM = 2;
+}
+
+enum ProtocolMode {
+    ProtocolMode_NA = 0;
+    MIL_STD_1553A = 1;
+    MIL_STD_1553B = 2;
+}
+
+enum BusChannel {
+    BusChannel_NA = 0;
+    BusA = 1;
+    BusB = 2;
+}
+
+enum TransmitReceiveType {
+    Receive = 0;
+    Transmit = 1;
+    TransmitReceiveType_NA = -1;
+}
+
+enum ParityType {
+    Even = 0;
+    Odd = 1;
+}
+
+enum SyncType {
+    SyncType_NA = 0;
+    CommandStatusSync = 1;
+    DataSync = 2;
+}
+
+enum GapType {
+    IntermessageGap = 0;
+    IntraMessageGap = 1;
+    GapType_NA = -1;
+}
+
+enum ResponseType {
+    ResponseValid = 0;
+    NoResponse = 1;
+    ResponseTooEarly = 2;
+    ResponseTooLate = 3;
+    ResponseType_NA = -1;
+}
+
+enum ErrorType {
+    ErrorType_None = 0;
+    ManchesterError = 1;
+    ParityError = 2;
+    SyncError = 3;
+    WordCountMismatch = 4;
+    NoResponse = 5;
+    IncorrectRTAddress = 6;
+    GapError = 7;
+    BitCountError = 8;
+    ContiguousWordError = 9;
+    IllegalModeCode = 10;
+    IllegalCommand = 11;
+    ReservedBitSet = 12;
+    InvalidBroadcast = 13;
+    ResponseTooEarly = 14;
+    ResponseTooLate = 15;
+    FormatError = 16;
+    InSufficientBits = 17;
+    MessageErrorBit = 18;
+    TerminalFlag = 19;
+    Busy = 20;
+    SubsystemFlag = 21;
+    ErrorType_Unknown = -1;
+}
+
+/* Mode codes from Table I / 4.3.3.5.1.7.
+   00000-01111: no data word, T/R = 1.
+   10000-11111: single data word; T/R indicates direction. */
+enum ModeCode {
+    DynamicBusControl = 0x00;
+    Synchronize = 0x01;
+    TransmitStatusWord = 0x02;
+    InitiateSelfTest = 0x03;
+    TransmitterShutdown = 0x04;
+    OverrideTransmitterShutdown = 0x05;
+    InhibitTerminalFlagBit = 0x06;
+    OverrideInhibitTerminalFlagBit = 0x07;
+    ResetRemoteTerminal = 0x08;
+    Reserved_Mode_0x09 = 0x09;
+    Reserved_Mode_0x0A = 0x0A;
+    Reserved_Mode_0x0B = 0x0B;
+    Reserved_Mode_0x0C = 0x0C;
+    Reserved_Mode_0x0D = 0x0D;
+    Reserved_Mode_0x0E = 0x0E;
+    Reserved_Mode_0x0F = 0x0F;
+    TransmitVectorWord = 0x10;
+    SynchronizeWithData = 0x11;
+    TransmitLastCommand = 0x12;
+    TransmitBITWord = 0x13;
+    SelectedTransmitterShutdown = 0x14;
+    OverrideSelectedTransmitterShutdown = 0x15;
+    Reserved_Mode_0x16 = 0x16;
+    Reserved_Mode_0x17 = 0x17;
+    Reserved_Mode_0x18 = 0x18;
+    Reserved_Mode_0x19 = 0x19;
+    Reserved_Mode_0x1A = 0x1A;
+    Reserved_Mode_0x1B = 0x1B;
+    Reserved_Mode_0x1C = 0x1C;
+    Reserved_Mode_0x1D = 0x1D;
+    Reserved_Mode_0x1E = 0x1E;
+    Reserved_Mode_0x1F = 0x1F;
+    ModeCode_NA = -1;
+}
+
+enum DataDescription {
+    DataDescription_Data = 0x00;
+    VectorWord = 0x01;
+    BITWord = 0x02;
+    LastCommandWord = 0x03;
+    SynchronizeData = 0x04;
+    SelectedTransmitter = 0x05;
+    DataDescription_NA = -1;
+}
