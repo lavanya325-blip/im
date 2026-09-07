@@ -1,0 +1,852 @@
+/* =========================================================
+   APP ROOT
+========================================================= */
+
+:host {
+
+  display: block;
+
+  width: 100%;
+
+  height: 100vh;
+
+  min-width: 0;
+
+  min-height: 0;
+
+  overflow: hidden;
+
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Arial,
+    sans-serif;
+
+  --app-bg: #ffffff;
+
+  --app-surface: #ffffff;
+
+  --app-surface-secondary: #f5f5f5;
+
+  --app-text: #202124;
+
+  --app-text-secondary: #555555;
+
+  --app-border: #d4d4d4;
+
+  --app-scrollbar: #c8c8c8;
+
+  --app-accent: #168bf0;
+
+}
+
+
+/* =========================================================
+   DARK MODE
+========================================================= */
+
+:host-context(.dark-mode) {
+
+  --app-bg: #242529;
+
+  --app-surface: #242529;
+
+  --app-surface-secondary: #1e2024;
+
+  --app-text: #eeeeee;
+
+  --app-text-secondary: #b8bac0;
+
+  --app-border: #3f4248;
+
+  --app-scrollbar: #555960;
+
+  --app-accent: #2196f3;
+
+}
+
+
+/* =========================================================
+   LIGHT MODE
+========================================================= */
+
+:host-context(.light-mode) {
+
+  --app-bg: #ffffff;
+
+  --app-surface: #ffffff;
+
+  --app-surface-secondary: #f5f5f5;
+
+  --app-text: #202124;
+
+  --app-text-secondary: #555555;
+
+  --app-border: #d4d4d4;
+
+  --app-scrollbar: #c8c8c8;
+
+  --app-accent: #168bf0;
+
+}
+
+
+/* =========================================================
+   BOX SIZING
+========================================================= */
+
+:host *,
+:host *::before,
+:host *::after {
+
+  box-sizing: border-box;
+
+}
+
+
+/* =========================================================
+   APP SHELL
+========================================================= */
+
+.app-shell {
+
+  width: 100%;
+
+  height: 100vh;
+
+  min-width: 0;
+
+  min-height: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  overflow: hidden;
+
+  background:
+    var(--app-bg);
+
+  color:
+    var(--app-text);
+
+}
+
+
+/* =========================================================
+   HEADER
+========================================================= */
+
+.site-header {
+
+  flex: 0 0 auto;
+
+  width: 100%;
+
+  min-width: 0;
+
+  background:
+    var(--app-surface-secondary);
+
+  color:
+    var(--app-text);
+
+}
+
+
+/* =========================================================
+   MENU BAR
+========================================================= */
+
+.menu-bar-wrapper {
+
+  width: 100%;
+
+  min-width: 0;
+
+  flex: 0 0 auto;
+
+}
+
+
+/* =========================================================
+   TOOL BAR
+========================================================= */
+
+.tool-bar-wrapper {
+
+  width: 100%;
+
+  min-width: 0;
+
+  flex: 0 0 auto;
+
+}
+
+
+/* =========================================================
+   MAIN LAYOUT
+========================================================= */
+
+.main-layout {
+
+  position: relative;
+
+  flex: 1 1 auto;
+
+  min-width: 0;
+
+  min-height: 0;
+
+  width: 100%;
+
+  display: grid;
+
+  grid-template-columns:
+    var(--left-panel-width, 250px)
+    minmax(0, 1fr)
+    var(--right-panel-width, 300px);
+
+  overflow: hidden;
+
+  background:
+    var(--app-bg);
+
+}
+
+
+/* =========================================================
+   RESIZABLE PANEL HANDLES
+========================================================= */
+
+.panel-resize-handle {
+
+  position: absolute;
+
+  top: 0;
+
+  bottom: 0;
+
+  width: 7px;
+
+  z-index: 100;
+
+  cursor: col-resize;
+
+  background: transparent;
+
+  transition:
+    background-color 0.15s ease;
+
+}
+
+
+/* =========================================================
+   LEFT RESIZE HANDLE
+========================================================= */
+
+.left-resize-handle {
+
+  left:
+    calc(
+      var(--left-panel-width, 250px) - 3px
+    );
+
+}
+
+
+/* =========================================================
+   RIGHT RESIZE HANDLE
+========================================================= */
+
+.right-resize-handle {
+
+  right:
+    calc(
+      var(--right-panel-width, 300px) - 3px
+    );
+
+}
+
+
+/* =========================================================
+   CENTER VERTICAL RESIZE HANDLE
+========================================================= */
+
+.center-resize-handle {
+
+  position: relative;
+
+  top: auto;
+
+  bottom: auto;
+
+  left: auto;
+
+  right: auto;
+
+  width: 100%;
+
+  height: 7px;
+
+  flex: 0 0 7px;
+
+  cursor: row-resize;
+
+  z-index: 101;
+
+  background:
+    var(--app-border);
+
+}
+
+
+/* =========================================================
+   RESIZE HANDLE HOVER
+========================================================= */
+
+.panel-resize-handle:hover {
+
+  background-color:
+    rgba(22, 139, 240, 0.35);
+
+}
+
+
+/* =========================================================
+   RESIZE HANDLE ACTIVE
+========================================================= */
+
+.panel-resize-handle.active {
+
+  background-color:
+    var(--app-accent);
+
+}
+
+
+/* =========================================================
+   MAIN LAYOUT DURING RESIZE
+========================================================= */
+
+.main-layout.resizing {
+
+  cursor: col-resize;
+
+}
+
+
+.main-layout.resizing-vertical {
+
+  cursor: row-resize;
+
+}
+
+
+/* =========================================================
+   LEFT PANEL
+========================================================= */
+
+.left-panel {
+
+  min-width: 0;
+
+  min-height: 0;
+
+  overflow: hidden;
+
+  background:
+    var(--app-surface);
+
+  color:
+    var(--app-text);
+
+  border-right:
+    1px solid
+    var(--app-border);
+
+}
+
+
+/* =========================================================
+   LEFT PANEL SCROLL
+========================================================= */
+
+.left-panel-scroll {
+
+  width: 100%;
+
+  height: 100%;
+
+  min-width: 0;
+
+  min-height: 0;
+
+  overflow-x: auto;
+
+  overflow-y: auto;
+
+  background:
+    var(--app-surface);
+
+}
+
+
+/* =========================================================
+   LEFT PANEL CONTENT
+========================================================= */
+
+.left-panel-content {
+
+  min-width: max-content;
+
+  min-height: 100%;
+
+  background:
+    var(--app-surface);
+
+  color:
+    var(--app-text);
+
+}
+
+
+/* =========================================================
+   CENTER PANEL
+========================================================= */
+
+.center-panel {
+
+  min-width: 0;
+
+  min-height: 0;
+
+  overflow: hidden;
+
+  background:
+    var(--app-surface);
+
+  color:
+    var(--app-text);
+
+}
+
+
+/* =========================================================
+   CENTER CONTENT
+========================================================= */
+
+.center-content {
+
+  width: 100%;
+
+  height: 100%;
+
+  min-width: 0;
+
+  min-height: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  overflow: hidden;
+
+  background:
+    var(--app-surface);
+
+  color:
+    var(--app-text);
+
+}
+
+
+/* =========================================================
+   MIDDLE UPPER WORK AREA
+========================================================= */
+
+.middle-work-area {
+
+  flex: 1 1 auto;
+
+  min-width: 0;
+
+  min-height: 120px;
+
+  width: 100%;
+
+  display: flex;
+
+  overflow: hidden;
+
+  background:
+    var(--app-surface);
+
+  color:
+    var(--app-text);
+
+}
+
+
+.middle-work-area > * {
+
+  flex: 1;
+
+  min-width: 0;
+
+  min-height: 0;
+
+}
+
+
+.plot-area {
+
+  flex: 1;
+
+  min-width: 0;
+
+  min-height: 0;
+
+  display: flex;
+
+  overflow: hidden;
+
+  background: #1F1F22;
+
+}
+
+
+.plot-area > * {
+
+  flex: 1;
+
+}
+
+
+/* =========================================================
+   BUS DATA GRID
+========================================================= */
+
+.bus-grid-slot {
+
+  flex: 0 0 var(--bus-grid-height, 280px);
+
+  min-width: 0;
+
+  min-height: 160px;
+
+  height: var(--bus-grid-height, 280px);
+
+  width: 100%;
+
+  overflow: hidden;
+
+  background:
+    var(--app-surface);
+
+  color:
+    var(--app-text);
+
+}
+
+
+/* =========================================================
+   RIGHT PANEL
+========================================================= */
+
+.right-panel {
+
+  min-width: 0;
+
+  min-height: 0;
+
+  overflow: hidden;
+
+  background:
+    var(--app-surface);
+
+  color:
+    var(--app-text);
+
+  border-left:
+    1px solid
+    var(--app-border);
+
+}
+
+
+/* =========================================================
+   RIGHT PANEL SCROLL
+========================================================= */
+
+.right-panel-scroll {
+
+  width: 100%;
+
+  height: 100%;
+
+  min-width: 0;
+
+  min-height: 0;
+
+  overflow-x: auto;
+
+  overflow-y: auto;
+
+  background:
+    var(--app-surface);
+
+}
+
+
+/* =========================================================
+   RIGHT PANEL CONTENT
+========================================================= */
+
+.right-panel-content {
+
+  min-width: 0;
+
+  min-height: 100%;
+
+  background:
+    var(--app-surface);
+
+  color:
+    var(--app-text);
+
+}
+
+
+/* =========================================================
+   FOOTER
+========================================================= */
+
+.app-footer {
+
+  flex: 0 0 0;
+
+  height: 0;
+
+  min-height: 0;
+
+  overflow: hidden;
+
+  background:
+    var(--app-surface-secondary);
+
+}
+
+
+/* =========================================================
+   SCROLLBARS
+========================================================= */
+
+.left-panel-scroll::-webkit-scrollbar,
+.middle-work-area::-webkit-scrollbar,
+.right-panel-scroll::-webkit-scrollbar {
+
+  width: 8px;
+
+  height: 8px;
+
+}
+
+
+.left-panel-scroll::-webkit-scrollbar-track,
+.middle-work-area::-webkit-scrollbar-track,
+.right-panel-scroll::-webkit-scrollbar-track {
+
+  background:
+    transparent;
+
+}
+
+
+.left-panel-scroll::-webkit-scrollbar-thumb,
+.middle-work-area::-webkit-scrollbar-thumb,
+.right-panel-scroll::-webkit-scrollbar-thumb {
+
+  background:
+    var(--app-scrollbar);
+
+  border-radius: 4px;
+
+}
+
+
+.left-panel-scroll::-webkit-scrollbar-thumb:hover,
+.middle-work-area::-webkit-scrollbar-thumb:hover,
+.right-panel-scroll::-webkit-scrollbar-thumb:hover {
+
+  background:
+    var(--app-text-secondary);
+
+}
+
+
+/* =========================================================
+   RESPONSIVE
+========================================================= */
+
+@media (max-width: 1100px) {
+
+  .main-layout {
+
+    grid-template-columns:
+      var(--left-panel-width, 250px)
+      minmax(0, 1fr)
+      var(--right-panel-width, 300px);
+
+  }
+
+}
+
+
+@media (max-width: 800px) {
+
+  .main-layout {
+
+    grid-template-columns:
+      var(--left-panel-width, 220px)
+      minmax(0, 1fr)
+      var(--right-panel-width, 260px);
+
+  }
+
+}
+
+
+/* =========================================================
+   FINAL THEME OVERRIDE
+   LEFT PANEL
+========================================================= */
+
+:host-context(.light-mode) .left-panel,
+:host-context(.light-mode) .left-panel-scroll,
+:host-context(.light-mode) .left-panel-content {
+
+  background:
+    var(--app-surface) !important;
+
+  color:
+    var(--app-text) !important;
+
+}
+
+
+:host-context(.dark-mode) .left-panel,
+:host-context(.dark-mode) .left-panel-scroll,
+:host-context(.dark-mode) .left-panel-content {
+
+  background:
+    var(--app-surface) !important;
+
+  color:
+    var(--app-text) !important;
+
+}
+
+
+/* =========================================================
+   BUS CONFIGURATION HOST
+========================================================= */
+
+:host-context(.light-mode) app-bus-configuration {
+
+  background:
+    var(--app-surface) !important;
+
+  color:
+    var(--app-text) !important;
+
+}
+
+
+:host-context(.dark-mode) app-bus-configuration {
+
+  background:
+    var(--app-surface) !important;
+
+  color:
+    var(--app-text) !important;
+
+}
+
+
+/* =========================================================
+   LEFT PANEL BORDER
+========================================================= */
+
+:host-context(.light-mode) .left-panel {
+
+  border-right-color:
+    var(--app-border) !important;
+
+}
+
+
+:host-context(.dark-mode) .left-panel {
+
+  border-right-color:
+    var(--app-border) !important;
+
+}
+
+
+/* =========================================================
+   RESIZE HANDLE - LIGHT MODE
+========================================================= */
+
+:host-context(.light-mode) .panel-resize-handle:hover {
+
+  background-color:
+    rgba(22, 139, 240, 0.30);
+
+}
+
+
+:host-context(.light-mode) .panel-resize-handle.active {
+
+  background-color:
+    #168bf0;
+
+}
+
+
+:host-context(.light-mode) .center-resize-handle {
+
+  background:
+    var(--app-border);
+
+}
+
+
+/* =========================================================
+   RESIZE HANDLE - DARK MODE
+========================================================= */
+
+:host-context(.dark-mode) .panel-resize-handle:hover {
+
+  background-color:
+    rgba(33, 150, 243, 0.45);
+
+}
+
+
+:host-context(.dark-mode) .panel-resize-handle.active {
+
+  background-color:
+    #2196f3;
+
+}
+
+
+:host-context(.dark-mode) .center-resize-handle {
+
+  background:
+    var(--app-border);
+
+}

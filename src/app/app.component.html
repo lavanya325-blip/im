@@ -1,0 +1,144 @@
+<div
+  class="app-shell"
+  [style.--left-panel-width]="leftPanelWidth + 'px'"
+  [style.--right-panel-width]="rightPanelWidth + 'px'"
+>
+
+  <!-- =====================================================
+       TOP HEADER
+  ====================================================== -->
+  <header class="site-header">
+
+    <!-- MENU BAR -->
+    <div class="menu-bar-wrapper">
+      <Menu-bar
+        (selectionChange)="onSelectionChange($event)"
+        (selectionDefaultChange)="OnSelectionDefaultChange($event)"
+        [selectedMode]="selecteddevicemode">
+      </Menu-bar>
+    </div>
+
+    <!-- TOOL BAR -->
+    <div class="tool-bar-wrapper">
+      <app-tool-bar
+        [isDarkMode]="isDarkMode"
+        (darkModeToggle)="toggleDarkMode()">
+      </app-tool-bar>
+    </div>
+
+  </header>
+
+
+  <!-- =====================================================
+       MAIN APPLICATION AREA
+       LEFT | CENTER | RIGHT
+       BUS CONFIG | WORK AREA | POST ANALYSIS
+  ====================================================== -->
+  <main
+    class="main-layout"
+    [class.resizing]="isResizing && resizeSide !== 'center'"
+    [class.resizing-vertical]="isResizing && resizeSide === 'center'"
+  >
+
+    <!-- =================================================
+         LEFT PANEL
+         BUS CONFIGURATION
+    ================================================== -->
+    <section class="left-panel">
+      <div class="left-panel-scroll">
+        <div class="left-panel-content">
+          <app-bus-configuration></app-bus-configuration>
+          <app-import-section></app-import-section>
+          <app-display-section></app-display-section>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- =================================================
+         LEFT RESIZE HANDLE
+    ================================================== -->
+    <div
+      class="panel-resize-handle left-resize-handle"
+      [class.active]="isResizing && resizeSide === 'left'"
+      title="Resize left panel"
+      (mousedown)="startResize('left', $event)">
+    </div>
+
+
+    <!-- =================================================
+         CENTER PANEL
+         MAIN WORK AREA + BUS DATA GRID
+    ================================================== -->
+    <section class="center-panel">
+      <div
+        class="center-content"
+        [style.--bus-grid-height]="busGridHeight + 'px'"
+      >
+
+        <!-- =========================================
+             MAIN WORK AREA
+        ========================================== -->
+        <div class="middle-work-area">
+          <!-- Center work area intentionally kept empty.
+               Waveform / graph / analysis content can be added here later. -->
+          <app-plot-view></app-plot-view>
+        </div>
+
+
+        <!-- =========================================
+             CENTER VERTICAL RESIZE HANDLE
+             (drag up / down to stretch plot vs grid)
+        ========================================== -->
+        <div
+          class="panel-resize-handle center-resize-handle"
+          [class.active]="isResizing && resizeSide === 'center'"
+          title="Resize plot and bus data grid"
+          (mousedown)="startResize('center', $event)">
+        </div>
+
+
+        <!-- =========================================
+             BUS DATA GRID
+        ========================================== -->
+        <div class="bus-grid-slot">
+          <app-bus-data-grid></app-bus-data-grid>
+        </div>
+
+      </div>
+    </section>
+
+
+    <!-- =================================================
+         RIGHT RESIZE HANDLE
+    ================================================== -->
+    <div
+      class="panel-resize-handle right-resize-handle"
+      [class.active]="isResizing && resizeSide === 'right'"
+      title="Resize right panel"
+      (mousedown)="startResize('right', $event)">
+    </div>
+
+
+    <!-- =================================================
+         RIGHT PANEL
+         POST ANALYSIS
+    ================================================== -->
+    <section class="right-panel">
+      <div class="right-panel-scroll">
+        <div class="right-panel-content">
+          <app-post-analysis></app-post-analysis>
+          <app-export-section></app-export-section>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+
+  <!-- =====================================================
+       FOOTER
+  ====================================================== -->
+  <footer class="app-footer"></footer>
+
+</div>
