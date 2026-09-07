@@ -209,7 +209,7 @@ export class AppComponent {
       document.documentElement;
 
     const body =
-      document.document.body;
+      document.body;
 
     const appRoot =
       document.querySelector('app-root');
