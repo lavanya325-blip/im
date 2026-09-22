@@ -3,73 +3,56 @@ import { Point } from '../models/plot-track.model';
 
 const bisector = d3.bisector((d: Point) => d.x);
 
-export function toRawPoints(firstEdgeRise: boolean, edges: number[]): Point[] {
-  const points: Point[] = [];
-  for (let index = 0; index < edges.length; index++) {
-    points.push({
-      x: edges[index],
-      y: index % 2 === (firstEdgeRise ? 0 : 1) ? 1 : 0
-    });
-  }
-  return points;
-}
-
-/**
- * Slice a step-after waveform to the padded visible window, matching I3C plot-view.
- * Extends the first/last level so the line does not disappear at the viewport edge.
- */
 export function toPoints(
-  waveform: Point[],
+  edges: Point[],
   visibleStart: number,
   visibleStop: number,
   fullDomain: [number, number]
 ): Point[] {
-  if (!waveform.length) {
-    return [];
+  const [begin] = fullDomain;
+  const startIndex = bisector.left(edges, visibleStart);
+  const endIndex = bisector.right(edges, visibleStop);
+
+  let prevState =
+    startIndex <= 0
+      ? (edges.length > 0 ? edges[0].y : 1)
+      : ((startIndex < edges.length ? edges[startIndex - 1].y : edges[edges.length - 1].y) === 0 ? 1 : 0);
+
+  if (visibleStart > begin) {
+    prevState = prevState === 0 ? 1 : 0;
   }
 
-  const [dataStart, dataEnd] = fullDomain;
-  const startIndex = Math.max(0, bisector.right(waveform, visibleStart) - 1);
-  const endIndex = Math.min(waveform.length, bisector.left(waveform, visibleStop) + 1);
-  const points = waveform.slice(startIndex, endIndex).map(point => ({ x: point.x, y: point.y }));
+  const points: Point[] = [];
+  let prevPoint: Point = { x: visibleStart, y: prevState };
+  points.push(prevPoint);
 
-  if (!points.length) {
-    return [];
+  for (let index = startIndex; index < endIndex; index++) {
+    const currentPoint = edges[index];
+    points.push({ x: currentPoint.x, y: prevPoint.y });
+    points.push({ x: currentPoint.x, y: currentPoint.y });
+    prevPoint = currentPoint;
   }
 
-  if (points[0].x > visibleStart) {
-    points.unshift({
-      x: Math.max(dataStart, visibleStart),
-      y: points[0].y
-    });
-  }
+  points.push({ x: visibleStop, y: prevPoint.y });
+  return points;
+}
 
-  const last = points[points.length - 1];
-  if (last.x < visibleStop) {
-    points.push({
-      x: Math.min(dataEnd, visibleStop),
-      y: last.y
-    });
-  }
+export function getWaveformState(firstEdge: boolean, index: number): number {
+  return index % 2 === (firstEdge ? 0 : 1) ? 1 : 0;
+}
 
+export function toRawPoints(firstEdge: boolean, edges: number[]): Point[] {
+  const points: Point[] = [];
+  for (let index = 0; index < edges.length; index++) {
+    points.push({ x: edges[index], y: getWaveformState(firstEdge, index) });
+  }
   return points;
 }
 
 export function toEngineeringTime(seconds: number): string {
   const abs = Math.abs(seconds);
-  const sign = seconds < 0 ? '-' : '';
-
-  if (abs === 0) {
-    return '0 s';
+  if (abs >= 1e-3) {
+    return `${(seconds * 1e3).toFixed(3)} ms`;
   }
-  if (abs < 1e-6) {
-    return `${sign}${(abs * 1e9).toFixed(2)} ns`;
-  }
-  if (abs < 1e-3) {
-    return `${sign}${(abs * 1e6).toFixed(2)} µs`;
-  }
-  if (abs < 1) {
-    return `${sign}${(abs * 1e3).toFixed(2)} ms`;
-  }
-  return `${sign}${abs.toFixed(3)} s`;
+  return `${(seconds * 1e6).toFixed(3)} µs`;
 }
