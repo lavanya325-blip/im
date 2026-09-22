@@ -17,21 +17,6 @@ import { BusPolygon, PacketBus, PlotTrack, Point } from './models/plot-track.mod
 import { EdgeCollection, TraceData } from './models/trace-data.model';
 import { toEngineeringTime, toPoints, toRawPoints } from './extensions/plot-extensions';
 import { BusExtensions } from './extensions/bus-extensions';
-import { D3ZoomHandler, D3ZoomHandlerCallbacks } from './services/zoom-handler';
-
-/** Toolbar ids — keep this list here so templates type-check even if plot-track.model.ts is stale. */
-export type PlotTool =
-  | 'snapshot'
-  | 'expand'
-  | 'select'
-  | 'zoomIn'
-  | 'zoomOut'
-  | 'pan'
-  | 'fit'
-  | 'move'
-  | 'cursor'
-  | 'grid'
-  | 'flag';
 
 const EPS = 1e-12;
 /** Visible plot should not be less than 1 ns (same floor as I3C). */
@@ -120,7 +105,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
   private minEdgeWidth = 50e-9;
   private referenceTime = 0;
   private resizeObserver?: ResizeObserver;
-  private zoomHandler?: D3ZoomHandler;
+  private zoomBehavior?: d3.ZoomBehavior<SVGSVGElement, unknown>;
   private readonly lineGenerator = d3.line<Point>().curve(d3.curveStepAfter);
   private readonly busBisectorLeft = d3.bisector((d: PacketBus) => d.EndTime).left;
   private readonly busBisectorRight = d3.bisector((d: PacketBus) => d.StartTime).right;
@@ -135,7 +120,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.zoomHandler?.destroy();
+    this.disableEvents();
     this.resizeObserver?.disconnect();
   }
 
@@ -505,7 +490,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
   }
 
   waveformWheel(event: WheelEvent): void {
-    if (this.zoomHandler) {
+    if (this.zoomBehavior) {
       return;
     }
     if (!this.hasData || !this.xScale) {
@@ -651,8 +636,11 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
   }
 
   private disableEvents(): void {
-    this.zoomHandler?.destroy();
-    this.zoomHandler = undefined;
+    const svg = this.waveformsvg?.nativeElement;
+    if (svg) {
+      d3.select(svg).on('.zoom', null);
+    }
+    this.zoomBehavior = undefined;
     this.clearZoomTransform();
     this.showOverlay = false;
     this.cdr.detectChanges();
@@ -666,23 +654,34 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
       return;
     }
 
-    const zoomCallbacks: D3ZoomHandlerCallbacks = {
-      onTransform: transform => {
-        d3.select(svg)
+    const selection = d3.select(svg);
+    this.zoomBehavior = d3
+      .zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.1, 10])
+      .filter((event: MouseEvent | WheelEvent) => {
+        if (event.type === 'wheel') {
+          return true;
+        }
+        return event instanceof MouseEvent && event.button === 0;
+      })
+      .on('zoom', (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
+        selection
           .select('g.zoom-content')
-          .attr('transform', `translate(${transform.x},0) scale(${transform.k},1)`);
-      },
-      onTransformEnd: async finalTransform => {
-        if (!this.xScale) {
+          .attr('transform', `translate(${event.transform.x},0) scale(${event.transform.k},1)`);
+      })
+      .on('end', (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
+        if (!event.sourceEvent || !this.xScale) {
           return;
         }
-        const newDomain = finalTransform.rescaleX(this.xScale).domain();
-        await this.processDomainUpdate([newDomain[0], newDomain[1]]);
-      }
-    };
+        const transform = event.transform;
+        if (transform.k === 1 && Math.abs(transform.x) < 0.5) {
+          return;
+        }
+        const [start, stop] = transform.rescaleX(this.xScale).domain();
+        void this.processDomainUpdate([start, stop]);
+      });
 
-    this.zoomHandler = new D3ZoomHandler(svg, zoomCallbacks, { scaleExtent: [0.1, 10] });
-    this.zoomHandler.init();
+    selection.call(this.zoomBehavior);
   }
 
   private async processDomainUpdate(domain: [number, number]): Promise<void> {
@@ -690,7 +689,10 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
     this.stop = domain[1];
     this.clampWindow();
     this.resizePlot();
-    this.zoomHandler?.reset();
+    const svg = this.waveformsvg?.nativeElement;
+    if (svg && this.zoomBehavior) {
+      d3.select(svg).call(this.zoomBehavior.transform, d3.zoomIdentity);
+    }
     this.clearZoomTransform();
   }
 

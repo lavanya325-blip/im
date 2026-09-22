@@ -9,6 +9,14 @@ export interface PacketBus {
   Content: string;
 }
 
+export interface PlotTrack {
+  id: string;
+  name: string;
+  subtitle: string;
+  color: string;
+  kind: 'bus' | 'channel';
+}
+
 export interface BusPolygon {
   center: Point;
   path: string;
@@ -17,10 +25,15 @@ export interface BusPolygon {
   endTime: number;
 }
 
-export interface PlotTrack {
-  id: string;
-  name: string;
-  subtitle: string;
-  color: string;
-  kind: 'bus' | 'channel';
-}
+export type PlotTool =
+  | 'snapshot'
+  | 'expand'
+  | 'select'
+  | 'zoomIn'
+  | 'zoomOut'
+  | 'pan'
+  | 'fit'
+  | 'move'
+  | 'cursor'
+  | 'grid'
+  | 'flag';
