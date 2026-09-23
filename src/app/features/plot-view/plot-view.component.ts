@@ -19,7 +19,7 @@ import { toEngineeringTime, toPoints, toRawPoints } from './extensions/plot-exte
 import { BusExtensions } from './extensions/bus-extensions';
 
 const EPS = 1e-12;
-/** Visible plot should not be less than 1 ns (same floor as I3C). */
+/** I3C zoom-in limit: visible plot should not be less than 1 ns. */
 const MIN_VISIBLE_SPAN = 1e-9;
 
 @Component({
@@ -71,13 +71,14 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
   selectEnabled = false;
   cursorTimes: number[] = [];
   markerTimes: number[] = [];
-  /** Kept for older templates that still bind cursorX / markers / flags. */
   flags: number[] = [];
 
   showOverlay = false;
-  overlayX = 0;
-  overlayWidth = 0;
+  overlayX = 20;
+  overlayWidth = 100;
   private overlayx0 = 0;
+  private zoomInEnabled = false;
+  private zoomOutEnabled = false;
   private dragging = false;
   private lastPointerX = 0;
   private lastPointerY = 0;
@@ -85,14 +86,13 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
   plotWidth = 800;
   plotHeight = 520;
   readonly axisHeight = 24;
-  /** Compact square-wave amplitude — leftover height becomes gap under each lane. */
   readonly waveHeight = 52;
   readonly decodeGap = 4;
   laneGap = 8;
-  /** Figma Group 9: 19px decode strip directly under the bus wave. */
   readonly decodeHeight = 19;
 
   xScale!: d3.ScaleLinear<number, number>;
+  yScale!: d3.ScaleLinear<number, number>;
   wavePaths = new Map<string, string>();
   busPolygons = new Map<string, BusPolygon[]>();
   gridLines: { x: number; label: string }[] = [];
@@ -102,7 +102,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
   private fullDomain: [number, number] = [0, 1];
   private start = 0;
   private stop = 1;
-  private minEdgeWidth = 50e-9;
+  private minEdgeWidth = MIN_VISIBLE_SPAN;
   private referenceTime = 0;
   private resizeObserver?: ResizeObserver;
   private zoomBehavior?: d3.ZoomBehavior<SVGSVGElement, unknown>;
@@ -113,7 +113,16 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
   constructor(private cdr: ChangeDetectorRef) {}
 
   ngAfterViewInit(): void {
-    this.observeSize();
+    this.resizeObserver = new ResizeObserver(() => {
+      this.measurePlot();
+      this.resizePlot();
+    });
+    if (this.waveformsvg?.nativeElement) {
+      this.resizeObserver.observe(this.waveformsvg.nativeElement);
+    } else if (this.waveformContainer?.nativeElement) {
+      this.resizeObserver.observe(this.waveformContainer.nativeElement);
+    }
+
     this.measurePlot();
     this.resizePlot();
     this.setupZoom();
@@ -184,20 +193,12 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
     return this.laneTop(trackIndex) + this.waveHeight + this.decodeGap;
   }
 
-  /**
-   * Single entry for plot data. Map a loaded .trace / ResultService
-   * response into TraceData and call this.
-   */
   loadTrace(data: TraceData | null): void {
-    this.clearPlot();
+    this.cleanWaveformData();
 
     if (!data) {
       this.hasData = false;
-      this.cdr.detectChanges();
-      this.observeSize();
-      this.measurePlot();
       this.resizePlot();
-      this.cdr.markForCheck();
       return;
     }
 
@@ -206,7 +207,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
     this.fullDomain = [data.startTime, data.endTime];
 
     Object.entries(data.channels).forEach(([id, collection]) => {
-      this.waveforms.set(id, this.edgesToWaveform(collection));
+      this.waveforms.set(id, this.toRawPoints(collection));
     });
     Object.entries(data.buses).forEach(([id, packets]) => {
       this.busMap.set(id, [...packets].sort((a, b) => a.StartTime - b.StartTime));
@@ -214,12 +215,9 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
 
     this.applyInitialWindow();
     this.hasData = this.waveforms.size > 0;
-    this.cdr.detectChanges();
-    this.observeSize();
     this.measurePlot();
     this.resizePlot();
     this.setupZoom();
-    this.cdr.markForCheck();
   }
 
   get hasValidData(): boolean {
@@ -256,6 +254,12 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
     if (tool === 'select') {
       return this.activeTool === 'select' || this.selectEnabled;
     }
+    if (tool === 'zoomIn') {
+      return this.zoomInEnabled;
+    }
+    if (tool === 'zoomOut') {
+      return this.zoomOutEnabled;
+    }
     return this.activeTool === tool;
   }
 
@@ -271,91 +275,98 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
         this.toggleFullscreen();
         break;
       case 'grid':
-        this.gridEnabled = !this.gridEnabled;
-        this.resizePlot();
+        this.onEnableGrid(event as MouseEvent);
         break;
       case 'flag':
-        this.decodeEnabled = !this.decodeEnabled;
-        this.measurePlot();
-        this.resizePlot();
+        this.onBitsClick(event as MouseEvent);
         break;
       case 'cursor':
-        this.activeTool = 'cursor';
-        this.cursorEnabled = true;
-        this.selectEnabled = false;
-        this.disableEvents();
+        this.onCursorEnableClick(undefined, event);
         break;
       case 'select':
-        this.activeTool = 'select';
-        this.selectEnabled = true;
-        this.cursorEnabled = false;
-        this.setupZoom();
+        this.onMouseEnableClick(event as MouseEvent);
         break;
       case 'pan':
-        this.activeTool = tool;
-        this.selectEnabled = false;
-        this.cursorEnabled = false;
-        this.setupZoom();
+        this.onPanClick(event as MouseEvent);
         break;
       case 'zoomIn':
+        this.onZoomInClick(event as MouseEvent);
+        break;
       case 'zoomOut':
+        this.onZoomOutClick(event as MouseEvent);
+        break;
       case 'move':
-        this.activeTool = tool;
+        this.activeTool = 'move';
         this.selectEnabled = false;
         this.cursorEnabled = false;
         this.disableEvents();
         break;
       case 'fit':
-        this.onFitClick(event);
+        this.onFitClick(event as MouseEvent);
         break;
     }
 
     this.cdr.markForCheck();
   }
 
-  /** I3C control names — same behavior as the Figma toolbar. */
-  onMouseEnableClick(event: Event): void {
-    this.onTool('select', event);
+  onMouseEnableClick(_event: MouseEvent): void {
+    this.activeTool = 'select';
+    this.selectEnabled = true;
+    this.cursorEnabled = false;
+    this.setupZoom();
   }
 
-  onZoomInClick(event: Event): void {
-    this.onTool('zoomIn', event);
+  onZoomInClick(_event: MouseEvent): void {
+    this.disableEvents();
+    this.activeTool = 'zoomIn';
+    this.zoomInEnabled = true;
+    this.selectEnabled = false;
+    this.cursorEnabled = false;
   }
 
-  onZoomOutClick(event: Event): void {
-    this.onTool('zoomOut', event);
+  onZoomOutClick(_event: MouseEvent): void {
+    this.disableEvents();
+    this.activeTool = 'zoomOut';
+    this.zoomOutEnabled = true;
+    this.selectEnabled = false;
+    this.cursorEnabled = false;
   }
 
-  onPanClick(event: Event): void {
-    this.onTool('pan', event);
+  onPanClick(event: MouseEvent): void {
+    this.activeTool = 'pan';
+    this.selectEnabled = false;
+    this.cursorEnabled = false;
+    this.onMouseEnableClick(event);
+    this.activeTool = 'pan';
   }
 
-  onFitClick(event?: Event): void {
-    event?.preventDefault();
-    event?.stopPropagation();
+  onFitClick(_event?: Event): void {
     const [begin, end] = this.fullDomain;
     void this.GotoTime(begin, end);
   }
 
-  onCursorEnableClick(_model: unknown, event?: Event): void {
-    this.onTool('cursor', event);
+  onCursorEnableClick(_model: unknown, _event?: Event): void {
+    this.disableEvents();
+    this.activeTool = 'cursor';
+    this.cursorEnabled = true;
+    this.selectEnabled = false;
   }
 
-  onEnableGrid(event: Event): void {
-    this.onTool('grid', event);
+  onEnableGrid(_event: MouseEvent): void {
+    this.gridEnabled = !this.gridEnabled;
+    this.resizePlot();
   }
 
-  onBitsClick(event: Event): void {
-    this.onTool('flag', event);
+  onBitsClick(_event: MouseEvent): void {
+    this.decodeEnabled = !this.decodeEnabled;
+    this.measurePlot();
+    this.resizePlot();
   }
 
   SaveImage(): void {
     this.capturePlot();
   }
 
-  /**
-   * I3C GotoTime: pad the requested span by 5% so the selected region is not flush to the edge.
-   */
   async GotoTime(startTime: number, stopTime: number): Promise<void> {
     let start = startTime;
     let stop = stopTime;
@@ -374,27 +385,19 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
   }
 
   waveformMousemove(event: MouseEvent): void {
-    this.onDocumentMove(event);
+    this.waveform_mousemove(event);
   }
 
   waveformMouseup(event: MouseEvent): void {
-    this.onDocumentUp(event);
-  }
-
-  waveform_mousedown(event: MouseEvent): void {
-    this.waveformMousedown(event);
-  }
-
-  waveform_mousemove(event: MouseEvent): void {
-    this.waveformMousemove(event);
-  }
-
-  waveform_mouseup(event: MouseEvent): void {
-    this.waveformMouseup(event);
+    this.waveform_mouseup(event);
   }
 
   waveformMousedown(event: MouseEvent): void {
-    if (!this.hasData || event.button !== 0 || !this.xScale) {
+    this.waveform_mousedown(event);
+  }
+
+  async waveform_mousedown(event: MouseEvent): Promise<void> {
+    if (!this.hasData || !this.xScale) {
       return;
     }
 
@@ -402,47 +405,52 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
     this.lastPointerX = x;
     this.lastPointerY = event.clientY;
 
-    if (this.activeTool === 'zoomIn') {
+    if (event.button === 0) {
+      if (this.zoomInEnabled) {
+        this.dragging = true;
+        this.showOverlay = true;
+        this.overlayx0 = x;
+        this.overlayX = this.overlayx0;
+        this.overlayWidth = 0;
+        event.stopPropagation();
+        return;
+      }
+
+      if (this.zoomOutEnabled) {
+        const visibleRange = this.stop - this.start;
+        const position = this.xScale.invert(x);
+        this.start = position - 2 * visibleRange;
+        this.stop = position + 2 * visibleRange;
+        this.clampWindow();
+        this.resizePlot();
+        event.stopPropagation();
+        return;
+      }
+
+      if (this.activeTool === 'cursor') {
+        this.cursorTimes = [...this.cursorTimes.slice(-1), this.xScale.invert(x)];
+        this.cursorEnabled = true;
+        this.cdr.markForCheck();
+        event.preventDefault();
+        return;
+      }
+
+      if (this.activeTool === 'move') {
+        this.dragging = true;
+        event.preventDefault();
+      }
+    } else if (event.button === 1 && !this.zoomInEnabled && !this.zoomOutEnabled) {
       this.dragging = true;
       this.showOverlay = true;
       this.overlayx0 = x;
-      this.overlayX = x;
+      this.overlayX = this.overlayx0;
       this.overlayWidth = 0;
-      event.preventDefault();
       event.stopPropagation();
-      return;
-    }
-
-    if (this.activeTool === 'zoomOut') {
-      const visibleRange = this.stop - this.start;
-      const position = this.xScale.invert(x);
-      this.start = position - 2 * visibleRange;
-      this.stop = position + 2 * visibleRange;
-      this.clampWindow();
-      this.resizePlot();
-      event.preventDefault();
-      event.stopPropagation();
-      return;
-    }
-
-    if (this.activeTool === 'cursor') {
-      const time = this.xScale.invert(x);
-      this.cursorTimes = [...this.cursorTimes.slice(-1), time];
-      this.cursorEnabled = true;
-      this.cdr.markForCheck();
-      event.preventDefault();
-      return;
-    }
-
-    if (this.activeTool === 'move') {
-      this.dragging = true;
-      event.preventDefault();
     }
   }
 
-  @HostListener('document:mousemove', ['$event'])
-  onDocumentMove(event: MouseEvent): void {
-    if (!this.dragging) {
+  waveform_mousemove(event: MouseEvent): void {
+    if (!this.dragging && !this.showOverlay) {
       return;
     }
 
@@ -452,7 +460,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
     this.lastPointerX = x;
     this.lastPointerY = event.clientY;
 
-    if (this.showOverlay && this.activeTool === 'zoomIn') {
+    if (this.showOverlay) {
       if (x >= this.overlayx0) {
         this.overlayX = this.overlayx0;
         this.overlayWidth = x - this.overlayx0;
@@ -460,6 +468,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
         this.overlayX = x;
         this.overlayWidth = this.overlayx0 - x;
       }
+      event.stopPropagation();
       this.cdr.markForCheck();
       return;
     }
@@ -470,22 +479,37 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  @HostListener('document:mouseup', ['$event'])
-  onDocumentUp(_event: MouseEvent): void {
-    if (!this.dragging) {
-      return;
-    }
-    this.dragging = false;
-
-    if (this.showOverlay) {
+  waveform_mouseup(event: MouseEvent): void {
+    if ((event.button === 0 || event.button === 1) && this.showOverlay) {
       this.showOverlay = false;
-      if (this.overlayWidth > 2 && this.xScale && this.activeTool === 'zoomIn') {
+      this.dragging = false;
+
+      if (this.overlayWidth > 2 && this.xScale) {
         this.start = this.xScale.invert(this.overlayX);
         this.stop = this.xScale.invert(this.overlayX + this.overlayWidth);
         this.clampWindow();
         this.resizePlot();
       }
+
+      event.stopPropagation();
       this.cdr.markForCheck();
+      return;
+    }
+
+    this.dragging = false;
+  }
+
+  @HostListener('document:mousemove', ['$event'])
+  onDocumentMove(event: MouseEvent): void {
+    if (this.dragging || this.showOverlay) {
+      this.waveform_mousemove(event);
+    }
+  }
+
+  @HostListener('document:mouseup', ['$event'])
+  onDocumentUp(event: MouseEvent): void {
+    if (this.dragging || this.showOverlay) {
+      this.waveform_mouseup(event);
     }
   }
 
@@ -496,7 +520,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
     if (!this.hasData || !this.xScale) {
       return;
     }
-    if (this.activeTool !== 'zoomIn' && this.activeTool !== 'zoomOut') {
+    if (!this.zoomInEnabled && !this.zoomOutEnabled) {
       return;
     }
     event.preventDefault();
@@ -507,7 +531,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
   waveYScale(trackIndex: number): d3.ScaleLinear<number, number> {
     const top = this.laneTop(trackIndex) + 6;
     const bottom = top + this.waveHeight - 12;
-    return d3.scaleLinear().domain([-0.12, 1.12]).range([bottom, top]);
+    return d3.scaleLinear().domain([-0.1, 1.1]).range([bottom, top]);
   }
 
   decodeYScale(trackIndex: number): d3.ScaleLinear<number, number> {
@@ -549,13 +573,11 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
     this.resizePlot();
   }
 
-  private edgesToWaveform(collection: EdgeCollection): Point[] {
+  private toRawPoints(collection: EdgeCollection): Point[] {
     return toRawPoints(collection.firstEdgeRise, collection.edges);
   }
 
-  /**
-   * I3C first-time window: show ~1000 min-edge intervals from the capture start.
-   */
+  /** I3C first-time visible window: start … start + minEdgeWidth * 1000. */
   private applyInitialWindow(): void {
     const [begin, end] = this.fullDomain;
     this.start = begin;
@@ -591,26 +613,13 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  private clearPlot(): void {
+  private cleanWaveformData(): void {
     this.waveforms.clear();
     this.busMap.clear();
     this.wavePaths.clear();
     this.busPolygons.clear();
     this.cursorTimes = [];
     this.markerTimes = [];
-  }
-
-  private observeSize(): void {
-    this.resizeObserver?.disconnect();
-    const host = this.waveformContainer?.nativeElement;
-    if (!host) {
-      return;
-    }
-    this.resizeObserver = new ResizeObserver(() => {
-      this.measurePlot();
-      this.resizePlot();
-    });
-    this.resizeObserver.observe(host);
   }
 
   private measurePlot(): void {
@@ -639,10 +648,12 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
     const svg = this.waveformsvg?.nativeElement;
     if (svg) {
       d3.select(svg).on('.zoom', null);
+      d3.select(svg).select('g.zoom-content').attr('transform', null);
     }
     this.zoomBehavior = undefined;
-    this.clearZoomTransform();
     this.showOverlay = false;
+    this.zoomInEnabled = false;
+    this.zoomOutEnabled = false;
     this.cdr.detectChanges();
   }
 
@@ -677,8 +688,8 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
         if (transform.k === 1 && Math.abs(transform.x) < 0.5) {
           return;
         }
-        const [start, stop] = transform.rescaleX(this.xScale).domain();
-        void this.processDomainUpdate([start, stop]);
+        const newDomain = transform.rescaleX(this.xScale).domain();
+        void this.processDomainUpdate([newDomain[0], newDomain[1]]);
       });
 
     selection.call(this.zoomBehavior);
@@ -693,30 +704,26 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
     if (svg && this.zoomBehavior) {
       d3.select(svg).call(this.zoomBehavior.transform, d3.zoomIdentity);
     }
-    this.clearZoomTransform();
+    d3.select(this.waveformsvg!.nativeElement).select('g.zoom-content').attr('transform', null);
   }
 
-  private clearZoomTransform(): void {
-    const svg = this.waveformsvg?.nativeElement;
-    if (!svg) {
-      return;
-    }
-    d3.select(svg).select('g.zoom-content').attr('transform', null);
-  }
+  resizePlot(): void {
+    const clientWidth = Math.max(1, this.plotWidth);
+    const busTracks = this.tracks.filter(track => track.kind === 'bus').length || 1;
+    const channelTracks = this.tracks.filter(track => track.kind === 'channel').length || 1;
 
-  private resizePlot(): void {
-    const waveWidth = Math.max(1, this.plotWidth);
-    this.xScale = d3.scaleLinear().domain([this.start, this.stop]).range([0, waveWidth]);
+    this.xScale = d3.scaleLinear().domain([this.start, this.stop]).range([0, clientWidth]);
+    this.yScale = d3
+      .scaleLinear()
+      .domain([0, channelTracks])
+      .range([this.plotHeight - this.axisHeight - this.decodeHeight * busTracks, 0]);
+
     this.updatePlot();
-    this.updateGrid(waveWidth);
-    this.cdr.markForCheck();
+    this.updateGrid(clientWidth);
+    this.cdr.detectChanges();
   }
 
-  /**
-   * Rebuild wave paths and decode polygons for the current domain.
-   * Visible slice is padded (2*start-stop … 2*stop-start) so pan/zoom edges stay filled.
-   */
-  private updatePlot(): void {
+  updatePlot(): void {
     this.wavePaths.clear();
     this.busPolygons.clear();
 
@@ -730,7 +737,9 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
     this.tracks.forEach((track, index) => {
       const yScale = this.waveYScale(index);
       const waveform = this.waveforms.get(track.id) ?? [];
+
       this.lineGenerator.x(d => this.xScale(d.x)).y(d => yScale(d.y));
+
       const points = toPoints(waveform, visibleStart, visibleStop, this.fullDomain);
       this.wavePaths.set(track.id, this.lineGenerator(points) ?? '');
 
@@ -739,11 +748,10 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
         const packets = this.busMap.get(track.id) ?? [];
         const startIndex = this.busBisectorLeft(packets, visibleStart);
         const endIndex = this.busBisectorRight(packets, visibleStop);
-        const visiblePackets = packets.slice(startIndex, endIndex);
 
         this.busPolygons.set(
           track.id,
-          visiblePackets.map(packet => ({
+          packets.slice(startIndex, endIndex).map(packet => ({
             center: BusExtensions.getPolygonCenter(packet, this.xScale, decodeScale),
             path: BusExtensions.getPolygon(packet, this.xScale, decodeScale),
             content: packet.Content,
