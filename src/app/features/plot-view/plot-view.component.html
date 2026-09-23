@@ -1,0 +1,195 @@
+<section class="plot-view">
+  <header class="plot-header">
+    <div class="plot-title">Plot View</div>
+    <div class="plot-header-actions">
+      <button
+        type="button"
+        class="icon-btn"
+        [class.is-active]="isFullscreen"
+        title="Full screen"
+        aria-label="Full screen"
+        (click)="toggleFullscreen(); $event.stopPropagation()"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path fill="currentColor" d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm16 0v6h-6v-2h4v-4h2z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="manipulation-tools" role="toolbar" aria-label="Plot operations">
+    <button
+      *ngFor="let tool of tools"
+      type="button"
+      class="tool-btn"
+      [style.order]="tool.order"
+      [class.is-active]="isToolLit(tool.id)"
+      [attr.title]="tool.label"
+      [attr.aria-label]="tool.label"
+      (click)="onTool(tool.id, $event)"
+      (mousedown)="$event.stopPropagation()"
+    >
+      <svg
+        *ngIf="tool.id === 'move'"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+      >
+        <path
+          fill="currentColor"
+          d="M15 9.5V6h2.5L12 .5 6.5 6H9v3.5H5.5V6L0 12l5.5 6v-3.5H9V18H6.5L12 23.5 17.5 18H15v-3.5h3.5V18L24 12l-5.5-6v3.5H15z"
+        />
+      </svg>
+      <mat-icon *ngIf="tool.id !== 'move'">{{ tool.icon }}</mat-icon>
+    </button>
+  </div>
+
+  <div class="plot-body">
+    <div class="lane-rail">
+      <div class="lane-label" *ngFor="let track of tracks; trackBy: trackTrack" [style.height.px]="laneHeight(track)">
+        <span class="lane-bar" [style.background]="track.color"></span>
+        <div class="lane-text">
+          <div class="lane-name">{{ track.name }}</div>
+          <div class="lane-sub">
+            <span class="swatch" [style.background]="track.color"></span>
+            {{ track.subtitle }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div #waveformContainer class="waveform-container">
+      <svg
+        #waveformsvg
+        class="waveform-svg"
+        [attr.width]="plotWidth"
+        [attr.height]="plotHeight"
+        [style.cursor]="plotCursor()"
+        (mousedown)="waveformMousedown($event)"
+        (mousemove)="waveformMousemove($event)"
+        (mouseup)="waveformMouseup($event)"
+        (wheel)="waveformWheel($event)"
+      >
+        <g class="grid" *ngIf="gridEnabled">
+          <line
+            *ngFor="let line of gridLines"
+            [attr.x1]="line.x"
+            [attr.x2]="line.x"
+            y1="0"
+            [attr.y2]="plotHeight - axisHeight"
+            class="grid-line"
+          ></line>
+          <line
+            *ngFor="let track of tracks; let i = index; trackBy: trackTrack"
+            x1="0"
+            [attr.x2]="plotWidth"
+            [attr.y1]="laneTop(i + 1)"
+            [attr.y2]="laneTop(i + 1)"
+            class="grid-line lane-sep"
+          ></line>
+        </g>
+
+        <g class="zoom-content">
+          <ng-container *ngFor="let track of tracks; let i = index; trackBy: trackTrack">
+            <path
+              *ngIf="hasData"
+              class="wave-path"
+              [attr.d]="wavePaths.get(track.id)"
+              [attr.stroke]="track.color"
+            ></path>
+
+            <g *ngIf="hasData && track.kind === 'bus' && decodeEnabled" class="bus-decode">
+              <line
+                class="decode-rail"
+                x1="0"
+                [attr.x2]="plotWidth"
+                [attr.y1]="decodeTop(i) + 0.5"
+                [attr.y2]="decodeTop(i) + 0.5"
+              ></line>
+              <line
+                class="decode-idle"
+                x1="0"
+                [attr.x2]="plotWidth"
+                [attr.y1]="decodeTop(i) + decodeHeight / 2"
+                [attr.y2]="decodeTop(i) + decodeHeight / 2"
+              ></line>
+              <line
+                class="decode-rail"
+                x1="0"
+                [attr.x2]="plotWidth"
+                [attr.y1]="decodeTop(i) + decodeHeight - 0.5"
+                [attr.y2]="decodeTop(i) + decodeHeight - 0.5"
+              ></line>
+              <ng-container *ngFor="let polygon of busPolygons.get(track.id)">
+                <polygon
+                  class="bus-poly"
+                  [attr.points]="polygon.path"
+                  [attr.fill]="track.color"
+                ></polygon>
+                <text
+                  class="bus-text"
+                  [attr.x]="polygon.center.x"
+                  [attr.y]="polygon.center.y"
+                >{{ polygon.content }}</text>
+                </ng-container>
+            </g>
+          </ng-container>
+        </g>
+
+        <rect
+          *ngIf="showOverlay"
+          class="zoom-overlay"
+          [attr.x]="overlayX"
+          y="0"
+          [attr.width]="overlayWidth"
+          [attr.height]="plotHeight - axisHeight"
+        ></rect>
+
+        <line
+          *ngIf="cursorEnabled && cursorX >= 0"
+          class="cursor-line"
+          [attr.x1]="cursorX"
+          [attr.x2]="cursorX"
+          y1="0"
+          [attr.y2]="plotHeight - axisHeight"
+        ></line>
+
+        <g *ngFor="let time of cursorTimes">
+          <line
+            class="cursor-line"
+            [attr.x1]="timeX(time)"
+            [attr.x2]="timeX(time)"
+            y1="0"
+            [attr.y2]="plotHeight - axisHeight"
+          ></line>
+        </g>
+        <g *ngFor="let time of markerTimes">
+          <line
+            class="marker-line"
+            [attr.x1]="timeX(time)"
+            [attr.x2]="timeX(time)"
+            y1="0"
+            [attr.y2]="plotHeight - axisHeight"
+          ></line>
+        </g>
+
+        <g class="time-axis">
+          <line
+            class="grid-line lane-sep"
+            x1="0"
+            [attr.x2]="plotWidth"
+            [attr.y1]="plotHeight - axisHeight"
+            [attr.y2]="plotHeight - axisHeight"
+          ></line>
+          <ng-container *ngIf="hasData">
+            <text
+              *ngFor="let line of gridLines"
+              class="axis-label"
+              [attr.x]="line.x"
+              [attr.y]="plotHeight - 6"
+            >{{ line.label }}</text>
+          </ng-container>
+        </g>
+      </svg>
+    </div>
+  </div>
+</section>
