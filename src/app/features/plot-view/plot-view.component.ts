@@ -333,11 +333,9 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
   }
 
   onPanClick(event: MouseEvent): void {
-    this.activeTool = 'pan';
-    this.selectEnabled = false;
-    this.cursorEnabled = false;
     this.onMouseEnableClick(event);
     this.activeTool = 'pan';
+    this.selectEnabled = false;
   }
 
   onFitClick(_event?: Event): void {
