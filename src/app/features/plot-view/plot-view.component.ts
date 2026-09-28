@@ -77,6 +77,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
   hasValidData = false;
   xScale!: d3.ScaleLinear<number, number>;
   yScale!: d3.ScaleLinear<number, number>;
+  private scalesReady = false;
   showBits = false;
 
   readonly tracks: PlotTrack[] = [
@@ -718,14 +719,14 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
   }
 
   get cursorX(): number {
-    if (!this.xScale || this.cursorTimes.length === 0) {
+    if (!this.scalesReady || this.cursorTimes.length === 0) {
       return -1;
     }
     return this.xScale(this.cursorTimes[this.cursorTimes.length - 1]);
   }
 
   get markers(): number[] {
-    if (!this.xScale) {
+    if (!this.scalesReady) {
       return [];
     }
     return this.markerTimes.map(time => this.xScale(time));
@@ -857,7 +858,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
   }
 
   waveformMousedown(event: MouseEvent): void {
-    if (!(this.hasData || this.hasValidData) || event.button !== 0 || !this.xScale) {
+    if (!(this.hasData || this.hasValidData) || event.button !== 0 || !this.scalesReady) {
       return;
     }
 
@@ -948,7 +949,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
 
     if (this.showOverlay) {
       this.showOverlay = false;
-      if (this.overlayWidth > 4 && this.xScale) {
+      if (this.overlayWidth > 4 && this.scalesReady) {
         const t0 = this.xScale.invert(this.overlayX);
         const t1 = this.xScale.invert(this.overlayX + this.overlayWidth);
         if (this.activeTool === 'zoomIn') {
@@ -965,7 +966,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
   }
 
   waveformWheel(event: WheelEvent): void {
-    if (!(this.hasData || this.hasValidData) || !this.xScale) {
+    if (!(this.hasData || this.hasValidData) || !this.scalesReady) {
       return;
     }
     if (this.activeTool !== 'select' && this.activeTool !== 'zoomIn' && this.activeTool !== 'zoomOut') {
@@ -977,7 +978,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
   }
 
   timeX(time: number): number {
-    return this.xScale ? this.xScale(time) : 0;
+    return this.scalesReady ? this.xScale(time) : 0;
   }
 
   private pointerX(event: MouseEvent): number {
@@ -1000,7 +1001,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
   }
 
   private shiftWindow(dxPixels: number): void {
-    if (!this.xScale) {
+    if (!this.scalesReady) {
       return;
     }
     const shift = this.xScale.invert(0) - this.xScale.invert(dxPixels);
@@ -1087,6 +1088,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
 
     this.xScale = d3.scaleLinear().domain([this.start, this.stop]).range([0, this.plotWidth]);
     this.yScale = d3.scaleLinear().domain([0, Math.max(1, numberOfPlots)]).range([drawableHeight - busHeight, 0]);
+    this.scalesReady = true;
 
     this.rebuildLanes(channelHeight, busHeight);
     if (this.edgeAvailableResponse || this.waveforms.size > 0) {
@@ -1133,7 +1135,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
     this.gridLines = this.gridEnabled
       ? Array.from({ length: lineCount }, (_, i) => {
           const x = ((i + 1) * width) / (lineCount + 1);
-          const label = this.xScale && (this.hasData || this.hasValidData)
+          const label = this.scalesReady && (this.hasData || this.hasValidData)
             ? toEngineeringTime(this.xScale.invert(x) - (this.referenceTime || this.TriggerTime || 0))
             : '';
           return { x, label };
@@ -1142,7 +1144,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy {
   }
 
   updatePlot(): void {
-    if (!this.xScale) {
+    if (!this.scalesReady) {
       return;
     }
 
