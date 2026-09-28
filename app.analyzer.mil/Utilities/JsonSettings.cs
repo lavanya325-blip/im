@@ -10,6 +10,4 @@ internal static class JsonSettings
         PropertyNameCaseInsensitive = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
-
-    public static readonly JsonSerializerOptions DecoderOptions = new(Options);
 }
