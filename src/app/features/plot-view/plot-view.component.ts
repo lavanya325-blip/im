@@ -30,14 +30,6 @@ import { PlotInfoDto, ProtocolFrameDto } from '../../core/dtos/result.service.dt
 import { HardwareStatus, HardwareStatusType } from '../../../protos/CaptureService';
 import * as annotationEx from '../extensions/result.annotations';
 import { processBusArray } from '../extensions/bus.extensions.i3c';
-import {
-  edgeTimes,
-  entriesFromEdges,
-  isWaveformChannel,
-  mergeEdgeChannels,
-  positiveEdgeWidth,
-  viewFromEdgeSample
-} from './plot-edge-pipeline';
 
 /** Toolbar ids — keep this list here so templates type-check even if plot-track.model.ts is stale. */
 export type PlotTool =
@@ -201,11 +193,6 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     return this.lanes.length ? this.lanes : this.tracks;
   }
 
-  /** Snapshot for the template. Map.keys() does not notify OnPush when entries are added. */
-  get legendPlots(): string[] {
-    return [...this.plotMap.entries()].filter(([, entry]) => entry.selected).map(([key]) => key);
-  }
-
   get channelPathList(): { id: string; channel: number; path: string; color: string }[] {
     return [...this.channelPaths.entries()].map(([id, value]) => ({
       id,
@@ -321,12 +308,14 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
 
           console.log('Plot map', this.plotMap);
 
-          // The DAT import often publishes edges before this state. Pick them up now.
+          // Edges from a DAT import are often published before this state.
           if (this.edgeAvailableResponse) {
             await this.updatePlotLimits();
-          } else {
-            this.resizePlot();
           }
+          if (this.configuration_I3C?.ProtocolName && this.plotMap.has('BUS')) {
+            this.plotMap.get('BUS')!.name = this.configuration_I3C.ProtocolName;
+          }
+          this.resizePlot();
           break;
         }
 
@@ -431,87 +420,64 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     if (this.plotMap.size > 0 || !this.edgeAvailableResponse) {
       return;
     }
-    for (const entry of entriesFromEdges(this.edgeAvailableResponse.ChannelEdgeAvailable)) {
-      this.plotMap.set(entry.key, {
-        name: entry.name,
-        channel: entry.channel as CommonTypes_pb.Channels,
+    this.edgeAvailableResponse.ChannelEdgeAvailable.forEach((channel, index) => {
+      this.plotMap.set('CH' + channel.Channel, {
+        name: 'Channel ' + channel.Channel,
+        channel: channel.Channel,
         allowSelection: true,
         selected: true
       });
-    }
-    if (this.plotMap.size > 0) {
-      this.plotMap.set('BUS', {
-        name: this.configuration?.ProtocolName || this.configuration_I3C?.ProtocolName || 'BUS',
-        allowSelection: false,
-        selected: true
-      });
-    }
+    });
+    this.plotMap.set('BUS', {
+      name: this.configuration_I3C?.ProtocolName || this.configuration?.ProtocolName || 'BUS',
+      allowSelection: false,
+      selected: true
+    });
   }
 
-  /**
-   * Create a waveform series for every selected channel, including channel 0.
-   * Also add channels that exist in the uploaded file but not in configuration.
-   */
-  private ensureSeriesForEdges(): void {
-    this.ensurePlotMapFromConfiguration();
-    this.ensurePlotMapFromEdges();
-
-    if (this.edgeAvailableResponse) {
-      const merged = mergeEdgeChannels(
-        [...this.plotMap.entries()].map(([key, entry]) => ({
-          key,
-          name: entry.name,
-          channel: entry.channel as number | undefined,
-          selected: entry.selected
-        })),
-        this.edgeAvailableResponse.ChannelEdgeAvailable
-      );
-      for (const entry of merged) {
-        if (this.plotMap.has(entry.key)) {
-          continue;
-        }
-        this.plotMap.set(entry.key, {
-          name: entry.name,
-          channel: entry.channel as CommonTypes_pb.Channels,
-          allowSelection: true,
-          selected: true
-        });
-      }
+  /** DAT channels that configuration did not list still need a waveform row. Channel 0 is valid. */
+  private includeEdgeChannels(): void {
+    if (!this.edgeAvailableResponse) {
+      return;
     }
+    const known = new Set<number>();
+    this.plotMap.forEach(entry => {
+      if (entry.channel != null) {
+        known.add(entry.channel as unknown as number);
+      }
+    });
+    this.edgeAvailableResponse.ChannelEdgeAvailable.forEach(channel => {
+      const id = channel.Channel as unknown as number;
+      if (id == null || known.has(id)) {
+        return;
+      }
+      this.plotMap.set('CH' + id, {
+        name: 'Channel ' + id,
+        channel: channel.Channel,
+        allowSelection: true,
+        selected: true
+      });
+      known.add(id);
+    });
+  }
 
+  private seedSeriesFromPlotMap(): void {
+    if (this.waveforms.size > 0 || this.busMap.size > 0 || this.plotMap.size === 0) {
+      return;
+    }
     let index = 1;
     this.plotMap.forEach((entry, key) => {
       if (!entry.selected) {
         return;
       }
-      if (isWaveformChannel(entry.channel as number | undefined)) {
-        const channel = entry.channel as CommonTypes_pb.Channels;
-        if (!this.waveforms.has(channel)) {
-          this.waveforms.set(channel, []);
-        }
-        const existing = this.channelPaths.get(key);
-        if (existing) {
-          existing.index = index++;
-          existing.channel = channel;
-        } else {
-          this.channelPaths.set(key, { index: index++, channel, yScale: d3.scaleLinear(), path: '' });
-        }
+      if (entry.channel != null) {
+        this.waveforms.set(entry.channel, []);
+        this.channelPaths.set(key, { index: index++, channel: entry.channel, yScale: d3.scaleLinear(), path: '' });
       } else {
-        if (!this.busMap.has(key)) {
-          this.busMap.set(key, []);
-        }
-        const existing = this.busPolygons.get(key);
-        if (existing) {
-          existing.index = index++;
-        } else {
-          this.busPolygons.set(key, { index: index++, yScale: d3.scaleLinear(), polygons: [] });
-        }
+        this.busMap.set(key, []);
+        this.busPolygons.set(key, { index: index++, yScale: d3.scaleLinear(), polygons: [] });
       }
     });
-  }
-
-  private seedSeriesFromPlotMap(): void {
-    this.ensureSeriesForEdges();
   }
 
   private async cleanWaveformData(): Promise<void> {
@@ -532,75 +498,97 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
 
   private async updatePlotLimits() {
     console.log('edges came');
-    if (!this.edgeAvailableResponse || this.edgeAvailableResponse.ChannelEdgeAvailable.length === 0) {
-      return;
-    }
+    if (this.edgeAvailableResponse && this.edgeAvailableResponse.ChannelEdgeAvailable.length > 0) {
+      if (this.waveforms.size == 0) {
+        if (this.plotMap.size == 0) {
+          this.ensurePlotMapFromEdges();
+        } else {
+          this.includeEdgeChannels();
+        }
 
-    const dataStart = this.edgeAvailableResponse.StartTime;
-    const dataEnd = this.edgeAvailableResponse.EndTime;
-    this.fullDomain = [dataStart, dataEnd > dataStart ? dataEnd : dataStart + this.minEdgeWidth * 1000];
+        if (this.plotMap.size == 0) {
+          return;
+        }
 
-    this.ensureSeriesForEdges();
-    if (this.waveforms.size === 0) {
-      console.log('update limits: plot map has no waveform channels yet');
-      this.cdr.markForCheck();
-      return;
-    }
+        var index = 1;
+        this.plotMap.forEach((v, k) => {
+          if (v.selected == false) {
+            return;
+          }
 
-    if ((this.downloadedDataStart == undefined && this.downloadedDataStop == undefined) || this.minEdgeWidthIsFinal == false) {
-      const channelWithMoreEdges = this.edgeAvailableResponse.ChannelEdgeAvailable.reduce((max, current) =>
-        current.Count > max.Count ? current : max
-      );
-
-      let edgeCount = channelWithMoreEdges.Count;
-      if (edgeCount > 1000) {
-        edgeCount = 1000;
-        this.minEdgeWidthIsFinal = true;
-      }
-
-      try {
-        const response = await this.coreService.ResultService.getEdges({
-          Channel: channelWithMoreEdges.Channel,
-          IndexBased: { Offset: 0, Count: Math.max(2, edgeCount) }
+          // Channel 0 is a real waveform. A truthy check used to drop it.
+          if (v.channel != null) {
+            this.waveforms.set(v.channel, []);
+            this.channelPaths.set(k, { index: index++, channel: v.channel, yScale: d3.scaleLinear(), path: '' });
+          } else {
+            this.busMap.set(k, []);
+            this.busPolygons.set(k, { index: index++, yScale: d3.scaleLinear(), polygons: [] });
+          }
         });
-        const times: number[] = edgeTimes(response?.Edges?.Edges);
-        const view = viewFromEdgeSample(times, dataStart, this.fullDomain[1], 1000);
-        this.minEdgeWidth = view.minEdgeWidth;
-        if (this.downloadedDataStart === undefined && this.downloadedDataStop === undefined) {
-          this.start = view.start;
-          this.stop = view.stop;
+
+        console.log('update limits plots added', this.plotMap);
+      }
+
+      var dataStart = this.edgeAvailableResponse.StartTime;
+      var dataEnd = this.edgeAvailableResponse.EndTime;
+      this.fullDomain = [dataStart, dataEnd > dataStart ? dataEnd : dataStart + this.minEdgeWidth * 1000];
+
+      if ((this.downloadedDataStart == undefined && this.downloadedDataStop == undefined) ||
+        (this.minEdgeWidthIsFinal == false)) {
+
+        var channelWithMoreEdges = this.edgeAvailableResponse
+          .ChannelEdgeAvailable
+          .reduce((max, current) =>
+            current.Count > max.Count ? current : max
+          );
+
+        var edgeCount = channelWithMoreEdges.Count;
+
+        if (edgeCount > 1000) {
+          edgeCount = 1000;
+          this.minEdgeWidthIsFinal = true;
         }
-        console.log('update min/ max edges', view.minEdgeWidth, this.start, this.stop, 'channel', channelWithMoreEdges.Channel, 'edges', times.length);
-      } catch (error) {
-        console.error('updatePlotLimits: edge sample failed', error);
-        this.minEdgeWidth = positiveEdgeWidth(this.minEdgeWidth);
-        if (this.downloadedDataStart === undefined && this.downloadedDataStop === undefined) {
-          const fallback = viewFromEdgeSample([], dataStart, this.fullDomain[1], 1000);
-          this.start = fallback.start;
-          this.stop = fallback.stop;
+
+        var response = await this.coreService.ResultService.getEdges({ Channel: channelWithMoreEdges.Channel, IndexBased: { Offset: 0, Count: edgeCount } });
+
+        var edges = response!.Edges!;
+        var difference = edges!.Edges
+          .map((d: number, i: number, arr: number[]) => (i > 0 ? d - arr[i - 1] : null))
+          .slice(1);
+
+        var [minEdgeWidth, maxEdgeWidth] = d3.extent(difference.filter((v): v is number => v != null && v > 0));
+        if (typeof minEdgeWidth === 'number' && minEdgeWidth > 0) {
+          this.minEdgeWidth = minEdgeWidth;
         }
+
+        console.log('update min/ max edges', minEdgeWidth, maxEdgeWidth, this.start, this.stop, 'channel', channelWithMoreEdges.Channel, 'firstedge', edges?.FirstEdge);
+
+        if ((this.downloadedDataStart === undefined && this.downloadedDataStop === undefined)) {
+          this.start = dataStart;
+          this.stop = dataStart + this.minEdgeWidth * 1000;
+        }
+
+        let downloadedStart = this.downloadedDataStart;
+        let downloadedStop = this.downloadedDataStop;
+
+        try {
+          await this.downloadRequiredData();
+        } catch (error) {
+          console.error('downloadRequiredData failed', error);
+        }
+
+        if (this.downloadedDataStart === downloadedStart && this.downloadedDataStop === downloadedStop &&
+          ![...this.waveforms.values()].some(points => points.length > 0)) {
+          return;
+        }
+
+        if (this.hasValidData == false) {
+          this.hasValidData = true;
+        }
+        this.hasData = true;
+
+        this.resizePlot();
       }
-
-      const downloadedStart = this.downloadedDataStart;
-      const downloadedStop = this.downloadedDataStop;
-
-      try {
-        await this.downloadRequiredData();
-      } catch (error) {
-        console.error('downloadRequiredData failed', error);
-      }
-
-      const hasPoints = [...this.waveforms.values()].some(points => points.length > 0);
-      const windowUnchanged = this.downloadedDataStart === downloadedStart && this.downloadedDataStop === downloadedStop;
-      if (windowUnchanged && this.hasValidData && !hasPoints) {
-        return;
-      }
-
-      if (hasPoints || this.downloadedDataStart !== undefined) {
-        this.markDataReady();
-      }
-
-      this.resizePlot();
     }
   }
 
@@ -617,14 +605,14 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         return;
       }
 
-      const visibleRange = Math.max(this.stop - this.start, this.minEdgeWidth);
+      var visibleRange = this.stop - this.start;
       let cacheStartTime = this.start - 4 * visibleRange;
       let cacheStopTime = this.stop + 4 * visibleRange;
 
       if (this.edgeAvailableResponse.StartTime > cacheStartTime) {
         cacheStartTime = this.edgeAvailableResponse.StartTime;
       }
-      if (this.edgeAvailableResponse.EndTime < cacheStopTime && this.edgeAvailableResponse.EndTime > cacheStartTime) {
+      if (this.edgeAvailableResponse.EndTime < cacheStopTime) {
         cacheStopTime = this.edgeAvailableResponse.EndTime;
       }
 
@@ -690,7 +678,11 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
 
       for (const busMapItem of this.busMap) {
         const bus = busMapItem[1];
-        const busResponseData = await this.fetchBus(busMapItem[0], startTime, stopTime);
+        const busInfo = this.plotMap.get(busMapItem[0]);
+        if (!busInfo?.name) {
+          continue;
+        }
+        const busResponseData = await this.requestBus(busInfo.name, startTime, stopTime);
         let prependedBus: DecoderTypes_pb.PacketBus[] = bus;
         if (bus.length > 0) {
           if (busResponseData.length > 0) {
@@ -736,13 +728,19 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         this.waveforms.set(channelResponse[0], edges);
       }
 
-      for (const busMapItem of this.busMap) {
-        const bus = busMapItem[1];
-        const busResponseData = await this.fetchBus(busMapItem[0], startTime, stopTime);
+      for (var busMapItem of this.busMap) {
+        var bus = busMapItem[1];
+        var protocolName = this.configuration_I3C?.ProtocolName || this.plotMap.get(busMapItem[0])?.name;
+        if (!protocolName) {
+          continue;
+        }
+
+        var busResponseData = await this.requestBus(protocolName, startTime, stopTime);
+
         let appendedBus: DecoderTypes_pb.PacketBus[] = bus;
         if (bus.length > 0) {
           if (busResponseData.length > 0) {
-            const busIndex = this.busBisectorLeft(bus, busResponseData[0].StartTime);
+            var busIndex = this.busBisectorLeft(bus, busResponseData[0].StartTime);
             appendedBus = bus.slice(0, busIndex).concat(busResponseData);
           }
         } else {
@@ -777,22 +775,9 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     });
   }
 
-  private async fetchBus(key: string, startTime: number, stopTime: number): Promise<DecoderTypes_pb.PacketBus[]> {
-    const protocol = this.plotMap.get(key)?.name || this.configuration?.ProtocolName || this.configuration_I3C?.ProtocolName;
-    if (!protocol) {
-      return [];
-    }
-    try {
-      return await this.requestBus(protocol, startTime, stopTime);
-    } catch (error) {
-      console.error('fetchBus failed', protocol, error);
-      return [];
-    }
-  }
-
   private async requestBus(name: string, startTime: number, stopTime: number) {
     const busResponse = await this.coreService.ResultService.getBus({ ProtocolName: name, StartTime: startTime, EndTime: stopTime });
-    return busResponse!.Buses.sort((a, b) => a.StartTime - b.StartTime);
+    return busResponse!.Buses.sort((a, b) => a.StartTime - b.EndTime);
   }
 
   async requestData(startTime: number, stopTime: number) {
@@ -825,7 +810,12 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   }
 
   private toRawPoints(firstEdge: boolean, edges: number[]) {
-    return edgeTimes(edges).map((x: number, index: number) => ({ x, y: this.getWaveformState(firstEdge, index) }));
+    var points: Point[] = [];
+    for (let index = 0; index < edges.length; index++) {
+      points.push({ x: edges[index], y: this.getWaveformState(firstEdge, index) });
+    }
+
+    return points;
   }
 
   private getWaveformState(firstEdge: boolean, index: number) {
@@ -1258,61 +1248,62 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       this.waveformSVG_Padding = this.getPadding(this.waveformsvg.nativeElement);
     }
 
-    const clientRect = this.getInternalSizeExcludingPadding_SVG();
-    const width = Math.max(1, clientRect.width || this.plotWidth);
-    const height = Math.max(1, clientRect.height || this.plotHeight);
-    this.plotWidth = width;
-    this.plotHeight = height;
-
-    this.rebuildLanes();
-
-    this.xScale = d3.scaleLinear().domain([this.start, this.stop]).range([0, width]);
-    this.yScale = d3.scaleLinear().domain([0, Math.max(1, this.visibleTracks.length)]).range([height, 0]);
-    this.scalesReady = Number.isFinite(this.start) && Number.isFinite(this.stop) && this.stop > this.start;
-
-    this.visibleTracks.forEach((track, index) => {
-      const top = this.laneTop(index);
-      const laneH = this.laneHeight(track);
-      const decode = track.kind === 'bus' && this.decodeEnabled ? this.decodeGap + this.decodeHeight : 0;
-      const waveTop = top + 4;
-      const waveBottom = top + Math.max(12, laneH - decode - 4);
-      const yScale = d3.scaleLinear().domain([-0.1, 1.1]).range([waveBottom, waveTop]);
-      const channel = this.channelPaths.get(track.id);
-      if (channel) {
-        channel.yScale = yScale;
-      }
-      const bus = this.busPolygons.get(track.id);
-      if (bus) {
-        bus.yScale = yScale;
-      }
+    var numberOfPlots = 0;
+    this.plotMap.forEach((p, k) => {
+      if (p.selected && k != 'BUS') numberOfPlots++;
     });
 
+    var clientRect = this.getInternalSizeExcludingPadding_SVG();
+    this.plotWidth = Math.max(1, clientRect.width || this.plotWidth);
+    this.plotHeight = Math.max(1, clientRect.height || this.plotHeight);
+
+    var mapSize = Math.max(1, this.plotMap.size);
+    var busHeight = clientRect.height / mapSize;
+    var channelHeight = numberOfPlots > 0 ? (clientRect.height - busHeight) / numberOfPlots : clientRect.height;
+
+    this.channelPaths.forEach((v) => {
+      v.yScale = d3.scaleLinear().domain([-0.1, 1.1]).range([v.index * channelHeight, channelHeight * (v.index - 1)]);
+    });
+
+    this.busPolygons.forEach((v) => {
+      v.yScale = d3.scaleLinear().domain([-0.1, 1.1]).range([clientRect.height, clientRect.height - busHeight]);
+    });
+
+    this.xScale = d3.scaleLinear()
+      .domain([this.start, this.stop])
+      .range([0, clientRect.width]);
+
+    this.yScale = d3.scaleLinear()
+      .domain([0, numberOfPlots])
+      .range([clientRect.height - busHeight, 0]);
+
+    this.rebuildLanes(channelHeight, busHeight);
+    this.scalesReady = Number.isFinite(this.start) && Number.isFinite(this.stop) && this.stop > this.start;
     this.updateGrid();
-    if (this.edgeAvailableResponse) {
+
+    if (this.edgeAvailableResponse)
       this.updatePlot();
-    }
 
     this.cdr.detectChanges();
     console.log('resizePlot: exited');
   }
 
-  private rebuildLanes(): void {
+  private rebuildLanes(channelHeight: number, busHeight: number): void {
     if (this.channelPaths.size === 0 && this.busPolygons.size === 0) {
-      this.lanes = [];
       return;
     }
     const rows: PlotTrack[] = [];
     const channels = [...this.channelPaths.entries()].sort((a, b) => a[1].index - b[1].index);
-    channels.forEach(([id, series], index) => {
+    channels.forEach(([id], index) => {
       const info = this.plotMap.get(id);
-      const channelNumber = Number(series.channel);
       rows.push({
         id,
         name: info?.name ?? id,
-        subtitle: id === 'SCL' || id.startsWith('SDA') ? 'I3C' : 'Async',
-        color: LANE_COLORS[(Number.isFinite(channelNumber) ? channelNumber : index) % LANE_COLORS.length],
+        subtitle: 'Async',
+        color: LANE_COLORS[index % LANE_COLORS.length],
         kind: 'channel'
       });
+      this.laneHeights.set(id, channelHeight);
     });
     [...this.busPolygons.keys()].forEach((id, index) => {
       const info = this.plotMap.get(id);
@@ -1323,24 +1314,9 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         color: LANE_COLORS[(channels.length + index) % LANE_COLORS.length],
         kind: 'bus'
       });
-    });
-    rows.forEach(row => {
-      const decode = row.kind === 'bus' && this.decodeEnabled ? this.decodeGap + this.decodeHeight : 0;
-      this.laneHeights.set(row.id, this.waveHeight + decode + this.laneGap);
+      this.laneHeights.set(id, Math.max(busHeight, 1));
     });
     this.lanes = rows;
-  }
-
-  /** Axis zero is the trigger, else the capture start, so labels are not a huge absolute time. */
-  private displayOrigin(): number {
-    if (this.referenceTime) {
-      return this.referenceTime;
-    }
-    if (this.TriggerTime) {
-      return this.TriggerTime;
-    }
-    const captureStart = this.edgeAvailableResponse?.StartTime ?? this.fullDomain[0];
-    return Number.isFinite(captureStart) ? captureStart : 0;
   }
 
   private updateGrid(): void {
@@ -1350,7 +1326,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       ? Array.from({ length: lineCount }, (_, i) => {
           const x = ((i + 1) * width) / (lineCount + 1);
           const label = this.scalesReady && (this.hasData || this.hasValidData)
-            ? toEngineeringTime(this.xScale.invert(x) - this.displayOrigin())
+            ? toEngineeringTime(this.xScale.invert(x) - (this.referenceTime || this.TriggerTime || 0))
             : '';
           return { x, label };
         })
@@ -1358,29 +1334,38 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   }
 
   updatePlot() {
-    if (!this.edgeAvailableResponse || !this.scalesReady) {
-      return;
-    }
+    if (!this.edgeAvailableResponse) return;
 
     const visibleStart = 2 * this.start - this.stop;
     const visibleStop = 2 * this.stop - this.start;
 
-    this.channelPaths.forEach((channelPath, channel) => {
+    this.channelPaths.forEach((v, channel) => {
+      const channelPath = this.channelPaths.get(channel)!;
       const plotInfo = this.plotMap.get(channel);
-      const waveform = plotInfo && isWaveformChannel(plotInfo.channel as number | undefined)
-        ? this.waveforms.get(plotInfo.channel as CommonTypes_pb.Channels)
-        : undefined;
-      if (!waveform) {
-        channelPath.path = '';
-        return;
-      }
 
-      this.lineGenerator.x(d => this.xScale(d.x)).y(d => channelPath.yScale(d.y));
-      const points = toPoints(waveform, visibleStart, visibleStop, [
-        this.edgeAvailableResponse!.StartTime,
-        this.edgeAvailableResponse!.EndTime
-      ]);
-      channelPath.path = this.lineGenerator(points) ?? '';
+      if (plotInfo?.channel != null) {
+        const waveform = this.waveforms.get(plotInfo.channel);
+        if (!waveform) {
+          channelPath.path = '';
+          return;
+        }
+
+        this.lineGenerator
+          .x(d => this.xScale(d.x))
+          .y(d => v.yScale(d.y));
+
+        const points = toPoints(
+          waveform,
+          visibleStart,
+          visibleStop,
+          [
+            this.edgeAvailableResponse!.StartTime,
+            this.edgeAvailableResponse!.EndTime
+          ]
+        );
+
+        channelPath.path = this.lineGenerator(points) ?? '';
+      }
     });
 
     this.busPolygons.forEach((bus, name) => {

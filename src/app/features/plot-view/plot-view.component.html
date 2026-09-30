@@ -53,15 +53,16 @@
       </div>
     </div>
 
-    <div #waveformContainer class="waveform-container plot-graph">
-      <div class="plot-legend">
-        <ng-container *ngFor="let plot of legendPlots">
-          <caption
-            class="plot-legend-item"
-            [style.color]="colorFor(plot)"
-            [ngClass]="plot == 'BUS' ? 'bus-BUS' : 'path-CH' + ((plotMap.get(plot)!.channel ?? -1) + 1)"
-          >{{ getLegendDisplayName(plot) }}</caption>
-        </ng-container>
+    <div #waveformContainer class="waveform-container">
+      <div class="plot-graph">
+        <div class="plot-legend">
+          <ng-container *ngFor="let plot of plotMap.keys()">
+            <caption
+              class="plot-legend-item {{ plot == 'BUS' ? 'bus-BUS' : 'path-CH' + ((plotMap.get(plot)!.channel ?? -1) + 1) }}"
+              *ngIf="plotMap.get(plot)!.selected"
+            >{{ getLegendDisplayName(plot) }}</caption>
+          </ng-container>
+        </div>
       </div>
 
       <svg
