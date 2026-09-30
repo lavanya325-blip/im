@@ -1284,6 +1284,10 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     var mapSize = Math.max(1, this.plotMap.size);
     var busHeight = clientRect.height / mapSize;
     var channelHeight = numberOfPlots > 0 ? (clientRect.height - busHeight) / numberOfPlots : clientRect.height;
+    // Lane rows stay a fixed height. Stretching them to the SVG makes zoom-out
+    // cover the listing window that sits under the plot.
+    const channelLane = this.waveHeight + this.laneGap;
+    const busLane = this.waveHeight + (this.decodeEnabled ? this.decodeGap + this.decodeHeight : 0) + this.laneGap;
 
     this.xScale = d3.scaleLinear()
       .domain([this.start, this.stop])
@@ -1293,7 +1297,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       .domain([0, numberOfPlots])
       .range([clientRect.height - busHeight, 0]);
 
-    this.rebuildLanes(channelHeight, busHeight);
+    this.rebuildLanes(channelLane, busLane);
     this.placeSeriesInLanes();
     this.scalesReady = Number.isFinite(this.start) && Number.isFinite(this.stop) && this.stop > this.start;
     this.updateGrid();
@@ -1320,7 +1324,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         color: LANE_COLORS[index % LANE_COLORS.length],
         kind: 'channel'
       });
-      this.laneHeights.set(id, channelHeight);
+      this.laneHeights.set(id, Math.min(channelHeight, this.waveHeight + this.laneGap));
     });
     [...this.busPolygons.keys()].forEach((id, index) => {
       const info = this.plotMap.get(id);
@@ -1331,7 +1335,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         color: LANE_COLORS[(channels.length + index) % LANE_COLORS.length],
         kind: 'bus'
       });
-      this.laneHeights.set(id, Math.max(busHeight, 1));
+      this.laneHeights.set(id, Math.min(Math.max(busHeight, 1), this.waveHeight + (this.decodeEnabled ? this.decodeGap + this.decodeHeight : 0) + this.laneGap));
     });
     this.lanes = rows;
   }
