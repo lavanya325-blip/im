@@ -563,8 +563,8 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
           Channel: channelWithMoreEdges.Channel,
           IndexBased: { Offset: 0, Count: Math.max(2, edgeCount) }
         });
-        const times = edgeTimes(response?.Edges?.Edges);
-        const difference = times.slice(1).map((value, index) => value - times[index]).filter(value => value > 0);
+        const times: number[] = edgeTimes(response?.Edges?.Edges);
+        const difference = times.slice(1).map((value: number, index: number) => value - times[index]).filter((value: number) => value > 0);
         const [minEdgeWidth, maxEdgeWidth] = d3.extent(difference);
         this.minEdgeWidth = positiveEdgeWidth(minEdgeWidth);
         console.log('update min/ max edges', minEdgeWidth, maxEdgeWidth, this.start, this.stop, 'channel', channelWithMoreEdges.Channel);
@@ -827,7 +827,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   }
 
   private toRawPoints(firstEdge: boolean, edges: number[]) {
-    return edgeTimes(edges).map((x, index) => ({ x, y: this.getWaveformState(firstEdge, index) }));
+    return edgeTimes(edges).map((x: number, index: number) => ({ x, y: this.getWaveformState(firstEdge, index) }));
   }
 
   private getWaveformState(firstEdge: boolean, index: number) {
