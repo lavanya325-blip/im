@@ -58,6 +58,7 @@
         <ng-container *ngFor="let plot of legendPlots">
           <caption
             class="plot-legend-item"
+            [style.color]="colorFor(plot)"
             [ngClass]="plot == 'BUS' ? 'bus-BUS' : 'path-CH' + ((plotMap.get(plot)!.channel ?? -1) + 1)"
           >{{ getLegendDisplayName(plot) }}</caption>
         </ng-container>

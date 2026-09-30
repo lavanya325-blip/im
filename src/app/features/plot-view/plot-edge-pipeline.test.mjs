@@ -5,6 +5,7 @@ import {
   initialVisibleWindow,
   isWaveformChannel,
   mergeEdgeChannels,
+  viewFromEdgeSample,
   waveformEntries
 } from './plot-edge-pipeline.ts';
 
@@ -45,5 +46,16 @@ assert.ok(stop > start);
 
 const [nanStart, nanStop] = initialVisibleWindow(1.5, Number.NaN);
 assert.ok(Number.isFinite(nanStop - nanStart) && nanStop > nanStart);
+
+const base = 1942239.582251;
+const sample = [];
+for (let i = 0; i < 80; i++) {
+  sample.push(base + i * 1e-6);
+}
+sample.splice(1, 0, base + 1e-15);
+const view = viewFromEdgeSample(sample, base, base + 10, 1000);
+assert.ok(view.stop - view.start > 70e-6, 'window follows the edge span, not the glitch');
+assert.ok(view.minEdgeWidth > 1e-7, 'min edge width ignores the tiny gap');
+assert.ok(view.start >= base - 1e-9);
 
 console.log('plot-edge-pipeline tests passed');

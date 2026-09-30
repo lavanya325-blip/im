@@ -33,10 +33,10 @@ import { processBusArray } from '../extensions/bus.extensions.i3c';
 import {
   edgeTimes,
   entriesFromEdges,
-  initialVisibleWindow,
   isWaveformChannel,
   mergeEdgeChannels,
-  positiveEdgeWidth
+  positiveEdgeWidth,
+  viewFromEdgeSample
 } from './plot-edge-pipeline';
 
 /** Toolbar ids — keep this list here so templates type-check even if plot-track.model.ts is stale. */
@@ -564,22 +564,20 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
           IndexBased: { Offset: 0, Count: Math.max(2, edgeCount) }
         });
         const times: number[] = edgeTimes(response?.Edges?.Edges);
-        const difference = times.slice(1).map((value: number, index: number) => value - times[index]).filter((value: number) => value > 0);
-        const [minEdgeWidth, maxEdgeWidth] = d3.extent(difference);
-        this.minEdgeWidth = positiveEdgeWidth(minEdgeWidth);
-        console.log('update min/ max edges', minEdgeWidth, maxEdgeWidth, this.start, this.stop, 'channel', channelWithMoreEdges.Channel);
+        const view = viewFromEdgeSample(times, dataStart, this.fullDomain[1], 1000);
+        this.minEdgeWidth = view.minEdgeWidth;
+        if (this.downloadedDataStart === undefined && this.downloadedDataStop === undefined) {
+          this.start = view.start;
+          this.stop = view.stop;
+        }
+        console.log('update min/ max edges', view.minEdgeWidth, this.start, this.stop, 'channel', channelWithMoreEdges.Channel, 'edges', times.length);
       } catch (error) {
         console.error('updatePlotLimits: edge sample failed', error);
         this.minEdgeWidth = positiveEdgeWidth(this.minEdgeWidth);
-      }
-
-      if (this.downloadedDataStart === undefined && this.downloadedDataStop === undefined) {
-        const [start, stop] = initialVisibleWindow(dataStart, this.minEdgeWidth);
-        const domainEnd = this.fullDomain[1];
-        this.start = start;
-        this.stop = domainEnd > start ? Math.min(stop, domainEnd) : stop;
-        if (!(this.stop > this.start)) {
-          this.stop = this.start + positiveEdgeWidth(this.minEdgeWidth) * 1000;
+        if (this.downloadedDataStart === undefined && this.downloadedDataStop === undefined) {
+          const fallback = viewFromEdgeSample([], dataStart, this.fullDomain[1], 1000);
+          this.start = fallback.start;
+          this.stop = fallback.stop;
         }
       }
 
@@ -1266,7 +1264,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     this.plotWidth = width;
     this.plotHeight = height;
 
-    this.rebuildLanes(height);
+    this.rebuildLanes();
 
     this.xScale = d3.scaleLinear().domain([this.start, this.stop]).range([0, width]);
     this.yScale = d3.scaleLinear().domain([0, Math.max(1, this.visibleTracks.length)]).range([height, 0]);
@@ -1298,20 +1296,21 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     console.log('resizePlot: exited');
   }
 
-  private rebuildLanes(plotHeight: number): void {
+  private rebuildLanes(): void {
     if (this.channelPaths.size === 0 && this.busPolygons.size === 0) {
       this.lanes = [];
       return;
     }
     const rows: PlotTrack[] = [];
     const channels = [...this.channelPaths.entries()].sort((a, b) => a[1].index - b[1].index);
-    channels.forEach(([id], index) => {
+    channels.forEach(([id, series], index) => {
       const info = this.plotMap.get(id);
+      const channelNumber = Number(series.channel);
       rows.push({
         id,
         name: info?.name ?? id,
         subtitle: id === 'SCL' || id.startsWith('SDA') ? 'I3C' : 'Async',
-        color: LANE_COLORS[index % LANE_COLORS.length],
+        color: LANE_COLORS[(Number.isFinite(channelNumber) ? channelNumber : index) % LANE_COLORS.length],
         kind: 'channel'
       });
     });
@@ -1325,9 +1324,23 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         kind: 'bus'
       });
     });
-    const each = Math.max(plotHeight, 1) / Math.max(rows.length, 1);
-    rows.forEach(row => this.laneHeights.set(row.id, each));
+    rows.forEach(row => {
+      const decode = row.kind === 'bus' && this.decodeEnabled ? this.decodeGap + this.decodeHeight : 0;
+      this.laneHeights.set(row.id, this.waveHeight + decode + this.laneGap);
+    });
     this.lanes = rows;
+  }
+
+  /** Axis zero is the trigger, else the capture start, so labels are not a huge absolute time. */
+  private displayOrigin(): number {
+    if (this.referenceTime) {
+      return this.referenceTime;
+    }
+    if (this.TriggerTime) {
+      return this.TriggerTime;
+    }
+    const captureStart = this.edgeAvailableResponse?.StartTime ?? this.fullDomain[0];
+    return Number.isFinite(captureStart) ? captureStart : 0;
   }
 
   private updateGrid(): void {
@@ -1337,7 +1350,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       ? Array.from({ length: lineCount }, (_, i) => {
           const x = ((i + 1) * width) / (lineCount + 1);
           const label = this.scalesReady && (this.hasData || this.hasValidData)
-            ? toEngineeringTime(this.xScale.invert(x) - (this.referenceTime || this.TriggerTime || 0))
+            ? toEngineeringTime(this.xScale.invert(x) - this.displayOrigin())
             : '';
           return { x, label };
         })

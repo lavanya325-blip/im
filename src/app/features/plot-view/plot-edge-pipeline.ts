@@ -53,6 +53,54 @@ export function initialVisibleWindow(dataStart: number, minEdgeWidth: number | n
   return [start, start + positiveEdgeWidth(minEdgeWidth) * 1000];
 }
 
+export type EdgeView = {
+  start: number;
+  stop: number;
+  minEdgeWidth: number;
+};
+
+/**
+ * Open the plot on the span of the first edges, not on the smallest delta.
+ * A single glitch (or a float-sized gap) used as minEdgeWidth * 1000 collapses
+ * the axis so every label is the same time and the trace looks like a flat line.
+ */
+export function viewFromEdgeSample(times: number[], dataStart: number, dataEnd: number, edgesToShow = 1000): EdgeView {
+  const sorted = times.filter((time): time is number => Number.isFinite(time)).sort((a, b) => a - b);
+  const origin = Number.isFinite(dataStart) ? dataStart : (sorted[0] ?? 0);
+  const domainEnd = Number.isFinite(dataEnd) && dataEnd > origin ? dataEnd : undefined;
+  const deltas: number[] = [];
+  for (let i = 1; i < sorted.length; i++) {
+    const delta = sorted[i] - sorted[i - 1];
+    if (delta > 0) {
+      deltas.push(delta);
+    }
+  }
+  deltas.sort((a, b) => a - b);
+  const median = deltas.length ? deltas[Math.floor(deltas.length / 2)] : DEFAULT_MIN_EDGE_WIDTH;
+  const typical = positiveEdgeWidth(deltas.find(delta => delta >= median * 0.05) ?? median);
+  const count = Math.max(1, edgesToShow);
+
+  let start = sorted.length ? sorted[0] : origin;
+  const lastIndex = Math.min(sorted.length - 1, count);
+  let stop = sorted.length > 1 ? sorted[lastIndex] : start + typical * count;
+  if (!(stop > start)) {
+    stop = start + typical * count;
+  }
+  const pad = Math.max((stop - start) * 0.02, typical);
+  start -= pad;
+  stop += pad;
+  if (start < origin) {
+    start = origin;
+  }
+  if (domainEnd != null && stop > domainEnd) {
+    stop = domainEnd;
+  }
+  if (!(stop > start)) {
+    stop = start + typical * 40;
+  }
+  return { start, stop, minEdgeWidth: typical };
+}
+
 /**
  * Edges often arrive before InitializeRun fills the plot map.
  * Seed one selected waveform row per channel in the file, including channel 0.
