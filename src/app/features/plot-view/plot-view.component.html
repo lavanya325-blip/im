@@ -54,17 +54,6 @@
     </div>
 
     <div #waveformContainer class="waveform-container">
-      <div class="plot-graph">
-        <div class="plot-legend">
-          <ng-container *ngFor="let plot of plotMap.keys()">
-            <caption
-              class="plot-legend-item {{ plot == 'BUS' ? 'bus-BUS' : 'path-CH' + ((plotMap.get(plot)!.channel ?? -1) + 1) }}"
-              *ngIf="plotMap.get(plot)!.selected"
-            >{{ getLegendDisplayName(plot) }}</caption>
-          </ng-container>
-        </div>
-      </div>
-
       <svg
         #waveformsvg
         class="waveform-svg"
@@ -111,11 +100,14 @@
                   class="bus-poly"
                   [attr.points]="polygon.path"
                   [attr.fill]="bus.color"
+                  fill-opacity="0.9"
                 ></polygon>
                 <text
+                  *ngIf="polygon.content && polygon.content.trim()"
                   class="bus-text"
                   [attr.x]="polygon.center.x"
                   [attr.y]="polygon.center.y"
+                  fill="#1a1a1a"
                 >{{ polygon.content }}</text>
               </g>
             </g>

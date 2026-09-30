@@ -641,9 +641,33 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         this.downloadedDataStart = cacheStartTime;
         this.downloadedDataStop = cacheStopTime;
       }
+
+      await this.ensureBusPackets(cacheStartTime, cacheStopTime);
     } finally {
       console.log('downloadRequiredData: exited');
       release();
+    }
+  }
+
+  /** Zooming out must still load MIL words. An earlier empty fetch must not block that. */
+  private async ensureBusPackets(startTime: number, stopTime: number): Promise<void> {
+    for (const busMapItem of this.busMap) {
+      const key = busMapItem[0];
+      const existing = [...busMapItem[1]].sort((a, b) => a.StartTime - b.StartTime);
+      const coversView = existing.length > 0 && existing[0].StartTime <= startTime && existing[existing.length - 1].EndTime >= stopTime;
+      if (coversView) {
+        continue;
+      }
+      const protocolName = this.configuration_I3C?.ProtocolName || this.configuration?.ProtocolName || this.plotMap.get(key)?.name;
+      if (!protocolName) {
+        continue;
+      }
+      try {
+        const busResponseData = await this.requestBus(protocolName, startTime, stopTime);
+        this.busMap.set(key, this.relabelSetdasa(busResponseData));
+      } catch (error) {
+        console.error('ensureBusPackets failed', protocolName, error);
+      }
     }
   }
 
@@ -1261,14 +1285,6 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     var busHeight = clientRect.height / mapSize;
     var channelHeight = numberOfPlots > 0 ? (clientRect.height - busHeight) / numberOfPlots : clientRect.height;
 
-    this.channelPaths.forEach((v) => {
-      v.yScale = d3.scaleLinear().domain([-0.1, 1.1]).range([v.index * channelHeight, channelHeight * (v.index - 1)]);
-    });
-
-    this.busPolygons.forEach((v) => {
-      v.yScale = d3.scaleLinear().domain([-0.1, 1.1]).range([clientRect.height, clientRect.height - busHeight]);
-    });
-
     this.xScale = d3.scaleLinear()
       .domain([this.start, this.stop])
       .range([0, clientRect.width]);
@@ -1278,6 +1294,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       .range([clientRect.height - busHeight, 0]);
 
     this.rebuildLanes(channelHeight, busHeight);
+    this.placeSeriesInLanes();
     this.scalesReady = Number.isFinite(this.start) && Number.isFinite(this.stop) && this.stop > this.start;
     this.updateGrid();
 
@@ -1317,6 +1334,43 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       this.laneHeights.set(id, Math.max(busHeight, 1));
     });
     this.lanes = rows;
+  }
+
+  /** Keep the trace inside Channel 3. The MIL lane stays free for decoder words. */
+  private placeSeriesInLanes(): void {
+    this.visibleTracks.forEach((track, index) => {
+      const top = this.laneTop(index) + 10;
+      const bottom = this.laneTop(index) + this.laneHeight(track) - 10;
+      if (track.kind === 'channel') {
+        const series = this.channelPaths.get(track.id);
+        if (series) {
+          series.yScale = d3.scaleLinear().domain([-0.1, 1.1]).range([bottom, top]);
+        }
+      } else {
+        const bus = this.busPolygons.get(track.id);
+        if (bus) {
+          bus.yScale = d3.scaleLinear().domain([0, 1]).range([bottom, top]);
+        }
+      }
+    });
+  }
+
+  private decoderBar(startTime: number, endTime: number, yScale: d3.ScaleLinear<number, number>): { path: string; center: { x: number; y: number }; showText: boolean } {
+    const rawLeft = this.xScale(Math.min(startTime, endTime));
+    const rawRight = this.xScale(Math.max(startTime, endTime));
+    const minWidth = 3;
+    const left = Number.isFinite(rawLeft) ? rawLeft : 0;
+    const right = Number.isFinite(rawRight) && rawRight - left >= minWidth ? rawRight : left + minWidth;
+    const yTop = yScale(1);
+    const yBottom = yScale(0);
+    const yMid = (yTop + yBottom) / 2;
+    const notch = Math.min(6, (right - left) / 3);
+    const path = `${left},${yMid} ${left + notch},${yTop} ${right - notch},${yTop} ${right},${yMid} ${right - notch},${yBottom} ${left + notch},${yBottom}`;
+    return {
+      path,
+      center: { x: (left + right) / 2, y: yMid + 4 },
+      showText: right - left >= 28
+    };
   }
 
   private updateGrid(): void {
@@ -1369,19 +1423,25 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     });
 
     this.busPolygons.forEach((bus, name) => {
-      const busList = this.busMap.get(name) ?? [];
+      const busList = [...(this.busMap.get(name) ?? [])].sort((a, b) => a.StartTime - b.StartTime);
       const startIndex = d3.bisectLeft(busList.map(e => e.EndTime), visibleStart);
       const endIndex = d3.bisectRight(busList.map(e => e.StartTime), visibleStop);
       const busArray = this.processBus(busList.slice(startIndex, endIndex));
 
-      bus.polygons = busArray.map(p => ({
-        center: BusExtensions.getPolygonCenter(p, this.xScale, bus.yScale),
-        path: BusExtensions.getPolygon(p, this.xScale, bus.yScale),
-        content: p.Content,
-        styleClass: BusExtensions.getPolygonStyleName(p).replaceAll(/[ _]/g, '').toLowerCase(),
-        startTime: p.StartTime,
-        endTime: p.EndTime
-      }));
+      bus.polygons = busArray.map(p => {
+        const bar = this.decoderBar(p.StartTime, p.EndTime, bus.yScale);
+        const extended = BusExtensions.getPolygon(p, this.xScale, bus.yScale);
+        const extendedCenter = BusExtensions.getPolygonCenter(p, this.xScale, bus.yScale);
+        const useExtended = !!extended && bar.showText;
+        return {
+          center: useExtended ? extendedCenter : bar.center,
+          path: useExtended ? extended : bar.path,
+          content: bar.showText ? p.Content : '',
+          styleClass: BusExtensions.getPolygonStyleName(p).replaceAll(/[ _]/g, '').toLowerCase(),
+          startTime: p.StartTime,
+          endTime: p.EndTime
+        };
+      });
     });
 
     if (this.showBits) {
