@@ -1,0 +1,17 @@
+<svg #gridsvg class="grid-svg">
+    <!-- Vertical grid lines -->
+    <line *ngFor="let x of GridLines"
+          [attr.x1]="x"
+          [attr.x2]="x"
+          [attr.y1]="0"
+          [attr.y2]="GridSize.height"
+        class="grid-line vertical">
+    </line>
+    <text  
+     aria-readonly="true"
+     #gridlabel *ngFor="let x of GridLines" 
+     text-anchor="middle"
+     [attr.x]="x" 
+     [attr.y]="GridSize.height - 1"  
+     class="grid-label vertical" >0.000s</text>
+</svg>

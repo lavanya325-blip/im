@@ -67,14 +67,6 @@
       >
         <g class="grid" *ngIf="gridEnabled">
           <line
-            *ngFor="let line of gridLines"
-            [attr.x1]="line.x"
-            [attr.x2]="line.x"
-            y1="0"
-            [attr.y2]="plotHeight - axisHeight"
-            class="grid-line"
-          ></line>
-          <line
             *ngFor="let track of visibleTracks; let i = index; trackBy: trackTrack"
             x1="0"
             [attr.x2]="plotWidth"
@@ -159,16 +151,13 @@
             [attr.y1]="plotHeight - axisHeight"
             [attr.y2]="plotHeight - axisHeight"
           ></line>
-          <ng-container *ngIf="hasValidData || hasData">
-            <text
-              *ngFor="let line of gridLines"
-              class="axis-label"
-              [attr.x]="line.x"
-              [attr.y]="plotHeight - 6"
-            >{{ line.label }}</text>
-          </ng-container>
         </g>
       </svg>
+      <plot-grid
+        [xScale]="xScale"
+        [TriggerTime]="TriggerTime"
+        [Enabled]="gridEnabled">
+      </plot-grid>
     </div>
   </div>
 </section>

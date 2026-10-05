@@ -15,6 +15,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatIconModule } from '@angular/material/icon';
+import { PlotGrid } from './components/plot-grid/plot-grid-component';
 import { MatDialog } from '@angular/material/dialog';
 import * as d3 from 'd3';
 import { Mutex } from 'async-mutex';
@@ -111,7 +112,7 @@ declare const PubSub: {
 @Component({
   selector: 'app-plot-view',
   standalone: true,
-  imports: [CommonModule, MatIconModule],
+  imports: [CommonModule, MatIconModule, PlotGrid],
   templateUrl: './plot-view.component.html',
   styleUrl: './plot-view.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush
