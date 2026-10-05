@@ -9,6 +9,7 @@ import {
   Input,
   OnChanges,
   OnDestroy,
+  Optional,
   SimpleChanges,
   ViewChild
 } from '@angular/core';
@@ -17,7 +18,6 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatDialog } from '@angular/material/dialog';
 import * as d3 from 'd3';
 import { Mutex } from 'async-mutex';
-import html2canvas from 'html2canvas';
 import { Subscription } from 'rxjs';
 import { Point } from '../models/plot.model';
 import { toPoints } from './extensions/plot-extensions';
@@ -234,10 +234,13 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   constructor(
     private cdr: ChangeDetectorRef,
     private coreService: CoreService,
-    public dialog: MatDialog,
-    private imageSession: ImageSessionService,
-    private zoomStateService: ZoomStateService
+    @Optional() public dialog: MatDialog | null,
+    @Optional() private imageSession: ImageSessionService | null,
+    @Optional() private zoomStateService: ZoomStateService | null
   ) {
+    if (!this.imageSession) {
+      return;
+    }
     this.imageCaptureSub = this.imageSession.captureRequest$.subscribe(
       async ({ frameIndex, resolve }) => {
         await this.waitUntilPlotReady(frameIndex);
@@ -386,8 +389,6 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
           break;
       }
     }));
-
-    this.setupZoom();
   }
 
   getPadding(element: SVGElement): Padding {
@@ -1068,7 +1069,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
           .select('g.zoom-content')
           .attr('transform', `translate(${transform.x},0) scale(${transform.k},1)`);
 
-        this.zoomStateService.updateTransform(transform);
+        this.zoomStateService?.updateTransform(transform);
       },
       onTransformEnd: async (finalTransform) => {
         if (!this.scalesReady) {
@@ -1079,7 +1080,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         const newDomain = finalTransform.rescaleX(this.xScale).domain() as [number, number];
         console.log('Interaction ended. New domain:', newDomain);
         await this.processDomainUpdate(newDomain);
-        this.zoomStateService.updateTransform(d3.zoomIdentity);
+        this.zoomStateService?.updateTransform(d3.zoomIdentity);
       }
     };
 
@@ -1143,6 +1144,10 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   }
 
   SaveImage(): void {
+    if (!this.dialog) {
+      console.error('Save image dialog is not available');
+      return;
+    }
     const dialogRef = this.dialog.open(SaveImageComponent);
 
     dialogRef.afterClosed().subscribe((result: { filePath: string; fileName: string }) => {
@@ -1212,10 +1217,23 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     }
 
     if (this.activeTool === 'select' || this.activeTool === 'pan') {
+      if (this.zoomHandler) {
+        return;
+      }
+    }
+
+    if (this.activeTool === 'select') {
+      this.dragging = true;
+      this.showOverlay = true;
+      this.overlayx0 = x;
+      this.overlayX = x;
+      this.overlayWidth = 0;
+      this.markerTimes = [this.xScale.invert(x)];
+      event.preventDefault();
       return;
     }
 
-    if (this.activeTool === 'move') {
+    if (this.activeTool === 'pan' || this.activeTool === 'move') {
       this.dragging = true;
       event.preventDefault();
     }
@@ -1273,9 +1291,18 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   }
 
   waveformWheel(event: WheelEvent): void {
-    if (this.activeTool === 'select' || this.activeTool === 'pan' || this.zoomInEnabled || this.zoomOutEnabled) {
+    if (this.zoomHandler || this.zoomInEnabled || this.zoomOutEnabled) {
       return;
     }
+    if (!(this.hasData || this.hasValidData) || !this.scalesReady) {
+      return;
+    }
+    if (this.activeTool !== 'select' && this.activeTool !== 'zoomIn' && this.activeTool !== 'zoomOut') {
+      return;
+    }
+    event.preventDefault();
+    const factor = event.deltaY > 0 ? 1.25 : 0.8;
+    this.zoomAround(this.pointerX(event), factor);
   }
 
   timeX(time: number): number {
@@ -1290,6 +1317,15 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     const rect = svg.getBoundingClientRect();
     const width = rect.width || this.plotWidth || 1;
     return ((event.clientX - rect.left) / width) * this.plotWidth;
+  }
+
+  private zoomAround(pixelX: number, factor: number): void {
+    const t = this.xScale.invert(pixelX);
+    const range = (this.stop - this.start) * factor;
+    this.start = t - range * ((t - this.start) / Math.max(this.stop - this.start, 1e-18));
+    this.stop = this.start + range;
+    this.clampWindow();
+    void this.downloadRequiredData().then(() => this.resizePlot());
   }
 
   private shiftWindow(dxPixels: number): void {
@@ -1526,6 +1562,17 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     return this.selectedFrame?.Index;
   }
 
+  private async rasterizePlot(element: HTMLElement): Promise<string | undefined> {
+    const html2canvas = (await import('html2canvas')).default;
+    const canvas = await html2canvas(element, {
+      backgroundColor: '#1f1f22',
+      scale: 2,
+      removeContainer: true,
+      useCORS: true
+    });
+    return canvas.toDataURL('image/png').split(',')[1];
+  }
+
   async capturePlot(filePath: string, fileName: string) {
     this.hideControls = true;
     this.cdr.detectChanges();
@@ -1535,13 +1582,10 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       if (!element) {
         return;
       }
-      const canvas = await html2canvas(element, {
-        backgroundColor: '#1f1f22',
-        scale: 2,
-        removeContainer: true,
-        useCORS: true
-      });
-      const imageBase64 = canvas.toDataURL('image/png').split(',')[1];
+      const imageBase64 = await this.rasterizePlot(element);
+      if (!imageBase64) {
+        return;
+      }
 
       this.hideControls = false;
       this.cdr.detectChanges();
@@ -1552,7 +1596,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         IsBinary: true
       });
       if (response.Success) {
-        this.dialog.open(GenericDialogComponent, {
+        this.dialog?.open(GenericDialogComponent, {
           data: {
             title: 'Plot Saved Successfully',
             message: `Plot Image saved at: ${fullPath}`,
@@ -1561,7 +1605,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
           },
           backdropClass: 'custom-dialog-backdrop'
         });
-        this.imageSession.addImage({
+        this.imageSession?.addImage({
           imagePath: fullPath,
           isIncluded: true,
           description: ''
@@ -1571,7 +1615,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
           IsBinary: true
         });
         if (readFileResponse.Success === true) {
-          this.imageSession.updateImageBase64(fullPath, readFileResponse.Content);
+          this.imageSession?.updateImageBase64(fullPath, readFileResponse.Content);
         } else {
           console.error(readFileResponse.Error);
           return;
@@ -1602,16 +1646,8 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         return undefined;
       }
 
-      const canvas = await html2canvas(element, {
-        backgroundColor: '#1f1f22',
-        scale: 2,
-        removeContainer: true,
-        logging: false,
-        imageTimeout: 0,
-        useCORS: true,
-      });
-
-      return canvas.toDataURL('image/png').split(',')[1];
+      const canvas = await this.rasterizePlot(element);
+      return canvas;
     } catch (err) {
       console.error('CapturePlotImage error:', err);
       return undefined;
