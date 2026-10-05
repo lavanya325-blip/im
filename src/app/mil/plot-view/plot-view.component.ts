@@ -1021,6 +1021,11 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         this.cursorEnabled = false;
         break;
       case 'pan':
+        this.activeTool = 'pan';
+        this.selectEnabled = false;
+        this.cursorEnabled = false;
+        this.setupZoom();
+        break;
       case 'move':
         this.disableEvents();
         this.activeTool = tool;
@@ -1104,7 +1109,10 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   }
 
   onPanClick(event: Event): void {
-    this.onTool('pan', event);
+    this.onMouseEnableClick(event);
+    this.activeTool = 'pan';
+    this.selectEnabled = false;
+    this.cdr.markForCheck();
   }
 
   onFitClick(event?: Event): void {
@@ -1197,11 +1205,11 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       return;
     }
 
-    if (this.activeTool === 'select') {
+    if (this.activeTool === 'select' || this.activeTool === 'pan') {
       return;
     }
 
-    if (this.activeTool === 'pan' || this.activeTool === 'move') {
+    if (this.activeTool === 'move') {
       this.dragging = true;
       event.preventDefault();
     }
@@ -1231,7 +1239,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       return;
     }
 
-    if (this.activeTool === 'pan' || this.activeTool === 'move') {
+    if (this.activeTool === 'move') {
       this.shiftWindow(dx);
       if (this.activeTool === 'move') {
         this.waveformContainer?.nativeElement.parentElement?.scrollBy({ top: -dy });
@@ -1259,7 +1267,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   }
 
   waveformWheel(event: WheelEvent): void {
-    if (this.activeTool === 'select' || this.zoomInEnabled || this.zoomOutEnabled) {
+    if (this.activeTool === 'select' || this.activeTool === 'pan' || this.zoomInEnabled || this.zoomOutEnabled) {
       return;
     }
   }
