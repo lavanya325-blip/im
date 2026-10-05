@@ -6,10 +6,10 @@ import {
   ElementRef,
   HostBinding,
   HostListener,
+  inject,
   Input,
   OnChanges,
   OnDestroy,
-  Optional,
   SimpleChanges,
   ViewChild
 } from '@angular/core';
@@ -22,11 +22,9 @@ import { Subscription } from 'rxjs';
 import { Point } from '../models/plot.model';
 import { toPoints } from './extensions/plot-extensions';
 import { BusExtensions } from './extensions/bus-extensions';
-import { SaveImageComponent } from './components/save-image/save-image.component';
 import { ImageSessionService } from './services/image-session.service';
 import { D3ZoomHandler, D3ZoomHandlerCallbacks } from './services/zoom-handler';
 import { ZoomStateService } from './services/zoom-state.service';
-import { GenericDialogComponent } from '../../shared/components/generic-dialog/generic-dialog.component';
 
 import * as WaveformTypes_pb from '../../../protos/WaveformTypes';
 import * as CommonTypes_pb from '../../../protos/CommonTypes';
@@ -230,27 +228,14 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   hideControls = false;
   private fontsLoaded = false;
   private imageCaptureSub?: Subscription;
+  private readonly dialog = inject(MatDialog, { optional: true });
+  private readonly imageSession = inject(ImageSessionService, { optional: true });
+  private readonly zoomStateService = inject(ZoomStateService, { optional: true });
 
   constructor(
     private cdr: ChangeDetectorRef,
-    private coreService: CoreService,
-    @Optional() public dialog: MatDialog | null,
-    @Optional() private imageSession: ImageSessionService | null,
-    @Optional() private zoomStateService: ZoomStateService | null
-  ) {
-    if (!this.imageSession) {
-      return;
-    }
-    this.imageCaptureSub = this.imageSession.captureRequest$.subscribe(
-      async ({ frameIndex, resolve }) => {
-        await this.waitUntilPlotReady(frameIndex);
-        await new Promise(r => requestAnimationFrame(() => r(null)));
-        await new Promise(r => setTimeout(r, 30));
-
-        const img = await this.CapturePlotImage();
-        resolve(img);
-      });
-  }
+    private coreService: CoreService
+  ) {}
 
   public waitUntilPlotReady(expectedFrame: number): Promise<boolean> {
     return new Promise(resolve => {
@@ -389,6 +374,19 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
           break;
       }
     }));
+
+    try {
+      this.imageCaptureSub = this.imageSession?.captureRequest$.subscribe(
+        async ({ frameIndex, resolve }) => {
+          await this.waitUntilPlotReady(frameIndex);
+          await new Promise(r => requestAnimationFrame(() => r(null)));
+          await new Promise(r => setTimeout(r, 30));
+          const img = await this.CapturePlotImage();
+          resolve(img);
+        });
+    } catch (err) {
+      console.error('Image capture subscription failed:', err);
+    }
   }
 
   getPadding(element: SVGElement): Padding {
@@ -1147,13 +1145,16 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       console.error('Save image dialog is not available');
       return;
     }
-    const dialogRef = this.dialog.open(SaveImageComponent);
-
-    dialogRef.afterClosed().subscribe((result: { filePath: string; fileName: string }) => {
-      if (result?.filePath && result?.fileName) {
-        void this.capturePlot(result.filePath, result.fileName);
-      }
-    });
+    void import('./components/save-image/save-image.component')
+      .then(({ SaveImageComponent }) => {
+        const dialogRef = this.dialog!.open(SaveImageComponent);
+        dialogRef.afterClosed().subscribe((result: { filePath: string; fileName: string }) => {
+          if (result?.filePath && result?.fileName) {
+            void this.capturePlot(result.filePath, result.fileName);
+          }
+        });
+      })
+      .catch(err => console.error('Save image dialog failed to load:', err));
   }
 
   waveformMousemove(event: MouseEvent): void {
@@ -1593,15 +1594,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         IsBinary: true
       });
       if (response.Success) {
-        this.dialog?.open(GenericDialogComponent, {
-          data: {
-            title: 'Plot Saved Successfully',
-            message: `Plot Image saved at: ${fullPath}`,
-            icon: 'success',
-            buttons: [{ text: 'Close', value: false }]
-          },
-          backdropClass: 'custom-dialog-backdrop'
-        });
+        console.log('Plot Image saved at:', fullPath);
         this.imageSession?.addImage({
           imagePath: fullPath,
           isIncluded: true,

@@ -1,15 +1,11 @@
 import { AfterViewInit, Component, ElementRef, Inject, Output, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
-import { MAT_DIALOG_DATA, MatDialog, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
+import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatIcon } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { CoreService } from '../../../../core/services/core.services';
-import { DashboardService } from '../../../services/dashboard.service';
-import { Subscription } from 'rxjs';
-import { SystemStates } from '../../../../../protos/CommonTypes';
-import { GenericDialogComponent } from '../../../../shared/components/generic-dialog/generic-dialog.component';
 import { FileFilter } from '../../../../core/services/file.service';
 
 @Component({
@@ -24,45 +20,20 @@ export class SaveImageComponent implements AfterViewInit {
   fileName: string = 'test.png';
 
   @ViewChild('folderInput') folderInput!: ElementRef;
-  @Output() saveEnabled: boolean = false;
-
-  private stateSubscription: Subscription;
+  @Output() saveEnabled: boolean = true;
 
   constructor(
     public coreService: CoreService,
     public dialogRef: MatDialogRef<SaveImageComponent>,
-    @Inject(MAT_DIALOG_DATA) public data: any,
-    private dashboardService: DashboardService,
-    private dialog: MatDialog
-  ) {
-    this.saveEnabled =
-      this.dashboardService.CurrentSystemState != SystemStates.StartRun &&
-      this.dashboardService.SaveTraceEnabled;
-
-    this.stateSubscription = this.dashboardService.currentSystemStateEvent$.subscribe(newState => {
-      switch (newState) {
-        case SystemStates.CleanupRun:
-          this.saveEnabled = false;
-          break;
-        case SystemStates.StartRun:
-        case SystemStates.StopRun:
-        case SystemStates.TerminateRun:
-        case SystemStates.RunCompleted:
-          this.saveEnabled = dashboardService.SaveTraceEnabled;
-          break;
-      }
-    });
-  }
+    @Inject(MAT_DIALOG_DATA) public data: any
+  ) {}
 
   async ngAfterViewInit(): Promise<void> {
-    this.filePath = this.dashboardService.PreferencesService.preferences$().saveImagePath;
-    const home = await this.coreService.PathService.getAppHome();
-
     try {
+      const home = await this.coreService.PathService.getAppHome();
       const absolutePath = this.coreService.PathService.combine(home, 'Images');
       this.filePath = absolutePath;
       await this.coreService.FileService.EnsureDirectoryExist(this.filePath);
-      this.dashboardService.PreferencesService.update({ saveImagePath: this.filePath });
     } catch (error) {
       console.error('Error occurred while resolving absolute path:', error);
     }
@@ -78,27 +49,21 @@ export class SaveImageComponent implements AfterViewInit {
       });
 
       if (response.Success) {
-        const savingDialog = this.createSaveDialog();
-        try {
-          this.fileName = response.SelectedFile;
-          await this.ok();
-        } finally {
-          savingDialog.close();
-        }
+        this.fileName = response.SelectedFile;
+        await this.ok();
       }
     } catch (error) {
       console.error('Error occurred saving trace.', error);
     }
   }
 
-  async btnBrowseClick(event: any) {
+  async btnBrowseClick(_event: unknown) {
     try {
       const response = await this.coreService.FileService.FolderBrowseSelection(this.filePath);
       if (response.Success) {
         const fullPath = response.Selection[0];
         if (fullPath) {
           this.filePath = fullPath;
-          this.dashboardService.PreferencesService.update({ saveImagePath: this.filePath });
         }
       }
     } catch (error) {
@@ -107,17 +72,12 @@ export class SaveImageComponent implements AfterViewInit {
   }
 
   async saveNow() {
-    const savingDialog = this.createSaveDialog();
-
     try {
       const timestamp = this.getCurrentTimestamp();
       this.fileName = `image_${timestamp}.png`;
-
       await this.ok();
     } catch (error) {
       console.error('Error occurred saving Image.', error);
-    } finally {
-      savingDialog.close();
     }
   }
 
@@ -158,22 +118,6 @@ export class SaveImageComponent implements AfterViewInit {
   }
 
   onClose(): void {
-    try {
-      this.stateSubscription?.unsubscribe();
-    } finally {
-      this.dialogRef.close();
-    }
-  }
-
-  private createSaveDialog() {
-    return this.dialog.open(GenericDialogComponent, {
-      data: {
-        title: 'Saving Plot',
-        message: 'Saving plot Image please wait...',
-        icon: 'info',
-        buttons: [],
-      },
-      backdropClass: 'custom-dialog-backdrop',
-    });
+    this.dialogRef.close();
   }
 }
