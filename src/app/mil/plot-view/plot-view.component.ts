@@ -19,8 +19,8 @@ import * as d3 from 'd3';
 import { Mutex } from 'async-mutex';
 import html2canvas from 'html2canvas';
 import { Subscription } from 'rxjs';
-import { BusPolygon, PlotTrack, Point } from './models/plot-track.model';
-import { toEngineeringTime, toPoints } from './extensions/plot-extensions';
+import { Point } from '../models/plot.model';
+import { toPoints } from './extensions/plot-extensions';
 import { BusExtensions } from './extensions/bus-extensions';
 import { SaveImageComponent } from './components/save-image/save-image.component';
 import { ImageSessionService } from './services/image-session.service';
@@ -33,6 +33,28 @@ import * as DecoderTypes_pb from '../../../protos/DecoderTypes';
 import { PlotInfoDto, ProtocolFrameDto } from '../../core/dtos/result.service.dtos';
 import { HardwareStatus, HardwareStatusType } from '../../../protos/CaptureService';
 
+export function toEngineeringTime(seconds: number): string {
+  const abs = Math.abs(seconds);
+  if (abs >= 1e-3) {
+    return `${(seconds * 1e3).toFixed(3)} ms`;
+  }
+  return `${(seconds * 1e6).toFixed(3)} µs`;
+}
+export interface PlotTrack {
+  id: string;
+  name: string;
+  subtitle: string;
+  color: string;
+  kind: 'bus' | 'channel';
+}
+export interface BusPolygon {
+  center: Point;
+  path: string;
+  content: string;
+  styleClass: string;
+  startTime: number;
+  endTime: number;
+}
 export type PlotTool =
   | 'snapshot'
   | 'expand'
@@ -124,7 +146,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   private laneHeights = new Map<string, number>();
 
   readonly tools: { id: string; icon: string; label: string; order: number }[] = [
-    { id: 'snapshot', icon: 'camera_alt', label: 'Save Image', order: 0 },
+    { id: 'snapshot', icon: 'camera_alt', label: 'Camera', order: 0 },
     { id: 'expand', icon: 'open_in_full', label: 'Expand', order: 1 },
     { id: 'select', icon: 'mouse', label: 'Mouse', order: 2 },
     { id: 'zoomIn', icon: 'zoom_in', label: 'Zoom in', order: 3 },
