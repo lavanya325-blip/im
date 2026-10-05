@@ -113,6 +113,20 @@
   flex: 1;
   min-width: 0;
   min-height: 360px;
+  --grid-line: #3f3f46;
+  --grid-label-color: #a1a1aa;
+}
+
+plot-grid {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  pointer-events: none;
+}
+
+plot-grid .grid-label {
+  fill: var(--grid-label-color);
 }
 
 .waveform-svg {

@@ -40,7 +40,7 @@ export class PlotGrid implements AfterViewInit, OnDestroy, OnChanges {
 
             if (this.GridSize) {
                 await this.generateGridLines();
-                this.updateGridLabelText(this.xScale);
+                this.updateGridLabelText(this.xScale!);
             }
         }
     }
@@ -59,19 +59,19 @@ export class PlotGrid implements AfterViewInit, OnDestroy, OnChanges {
         this.resizeObserver.observe(this.gridsvg.nativeElement);
 
         await this.generateGridLines();
-        this.updateGridLabelText(this.xScale);
+        this.updateGridLabelText(this.xScale!);
 
         this.zoomStateService.transform$
             .pipe(takeUntil(this.destroy$))
             .subscribe(newTransform => {
-                if (!this.gridsvg || !this.xScale) return;
+                if (!this.gridsvg) return;
 
-                const transformedScale = newTransform.rescaleX(this.xScale);
+                const transformedScale = newTransform.rescaleX(this.xScale!);
                 this.updateGridLabelText(transformedScale);
             });
     }
 
-    private updateGridLabelText(scale: d3.ScaleLinear<number, number> | undefined) {
+    private updateGridLabelText(scale: d3.ScaleLinear<number, number>) {
         if (!scale) {
             return;
         }
@@ -122,6 +122,6 @@ export class PlotGrid implements AfterViewInit, OnDestroy, OnChanges {
             .selectAll<SVGTextElement, number>("text.grid-label")
             .data(this.GridLines);
 
-        this.updateGridLabelText(this.xScale);
+        this.updateGridLabelText(this.xScale!);
     }
 }
