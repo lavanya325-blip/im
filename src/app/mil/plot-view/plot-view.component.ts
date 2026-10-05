@@ -153,7 +153,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     { id: 'zoomOut', icon: 'zoom_out', label: 'Zoom out', order: 4 },
     { id: 'pan', icon: 'pan_tool', label: 'Pan', order: 5 },
     { id: 'move', icon: 'open_with', label: 'Drag pan', order: 6 },
-    { id: 'cursor', icon: 'calendar_month', label: 'Calendar', order: 7 },
+    { id: 'fit', icon: 'calendar_month', label: 'Fit', order: 7 },
     { id: 'grid', icon: 'grid_3x3', label: 'Grid', order: 8 },
     { id: 'flag', icon: 'table_chart', label: 'Table view', order: 9 }
   ];
