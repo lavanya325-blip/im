@@ -24,6 +24,7 @@ import { toPoints } from './extensions/plot-extensions';
 import { BusExtensions } from './extensions/bus-extensions';
 import { SaveImageComponent } from './components/save-image/save-image.component';
 import { ImageSessionService } from './services/image-session.service';
+import { D3ZoomHandler, D3ZoomHandlerCallbacks } from './services/zoom-handler';
 import { GenericDialogComponent } from '../../shared/components/generic-dialog/generic-dialog.component';
 
 import * as WaveformTypes_pb from '../../../protos/WaveformTypes';
@@ -319,6 +320,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   ngAfterViewInit(): void {
     this.waveformSVG_Padding = this.getPadding(this.waveformsvg.nativeElement);
     this.observeSize();
+    this.setupZoom();
 
     this.pubSubTokens.push(PubSub.subscribe('EdgesAvailableResponse', (_msgType, msg: WaveformTypes_pb.EdgesAvailableResponse) => {
       if (msg) {
@@ -861,6 +863,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   }
 
   ngOnDestroy(): void {
+    this.zoomHandler?.destroy();
     this.imageCaptureSub?.unsubscribe();
     this.resizeObserver?.disconnect();
     for (const token of this.pubSubTokens) {
@@ -991,6 +994,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         this.resizePlot();
         break;
       case 'cursor':
+        this.disableEvents();
         this.activeTool = 'cursor';
         this.cursorEnabled = true;
         break;
@@ -998,11 +1002,13 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         this.activeTool = 'select';
         this.selectEnabled = true;
         this.cursorEnabled = false;
+        this.setupZoom();
         break;
       case 'zoomIn':
       case 'zoomOut':
       case 'pan':
       case 'move':
+        this.disableEvents();
         this.activeTool = tool;
         this.selectEnabled = false;
         this.cursorEnabled = false;
@@ -1012,6 +1018,56 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         break;
     }
     this.cdr.markForCheck();
+  }
+
+  private zoomHandler?: D3ZoomHandler;
+
+  private disableEvents(): void {
+    this.zoomHandler?.destroy();
+    this.zoomHandler = undefined;
+
+    d3.select(this.waveformsvg.nativeElement).select('g.zoom-content').attr('transform', null);
+
+    this.showOverlay = false;
+    this.cdr.detectChanges();
+  }
+
+  private setupZoom(): void {
+    this.disableEvents();
+
+    const zoomCallbacks: D3ZoomHandlerCallbacks = {
+      onTransform: (transform) => {
+        d3.select(this.waveformsvg.nativeElement)
+          .select('g.zoom-content')
+          .attr('transform', `translate(${transform.x},0) scale(${transform.k},1)`);
+      },
+      onTransformEnd: async (finalTransform) => {
+        if (!this.scalesReady) {
+          return;
+        }
+        const newDomain = finalTransform.rescaleX(this.xScale).domain() as [number, number];
+        console.log('Interaction ended. New domain:', newDomain);
+        await this.processDomainUpdate(newDomain);
+      }
+    };
+
+    this.zoomHandler = new D3ZoomHandler(
+      this.waveformsvg.nativeElement,
+      zoomCallbacks,
+      { scaleExtent: [0.1, 10] }
+    );
+    this.zoomHandler.init();
+  }
+
+  private async processDomainUpdate(domain: [number, number]): Promise<void> {
+    this.start = domain[0];
+    this.stop = domain[1];
+    this.clampWindow();
+    await this.downloadRequiredData();
+    this.resizePlot();
+    this.zoomHandler?.reset();
+    d3.select(this.waveformsvg.nativeElement).select('g.zoom-content').attr('transform', null);
+    console.log('Chart updated and zoom state has been reset.');
   }
 
   onMouseEnableClick(event: Event): void {
@@ -1116,13 +1172,6 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     }
 
     if (this.activeTool === 'select') {
-      this.dragging = true;
-      this.showOverlay = true;
-      this.overlayx0 = x;
-      this.overlayX = x;
-      this.overlayWidth = 0;
-      this.markerTimes = [this.xScale.invert(x)];
-      event.preventDefault();
       return;
     }
 
@@ -1190,10 +1239,13 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   }
 
   waveformWheel(event: WheelEvent): void {
+    if (this.activeTool === 'select') {
+      return;
+    }
     if (!(this.hasData || this.hasValidData) || !this.scalesReady) {
       return;
     }
-    if (this.activeTool !== 'select' && this.activeTool !== 'zoomIn' && this.activeTool !== 'zoomOut') {
+    if (this.activeTool !== 'zoomIn' && this.activeTool !== 'zoomOut') {
       return;
     }
     event.preventDefault();
