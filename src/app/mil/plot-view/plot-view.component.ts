@@ -18,6 +18,7 @@ import { MatDialog } from '@angular/material/dialog';
 import * as d3 from 'd3';
 import { Mutex } from 'async-mutex';
 import html2canvas from 'html2canvas';
+import { Subscription } from 'rxjs';
 import { BusPolygon, PlotTrack, Point } from './models/plot-track.model';
 import { toEngineeringTime, toPoints } from './extensions/plot-extensions';
 import { BusExtensions } from './extensions/bus-extensions';
@@ -204,13 +205,42 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
 
   hideControls = false;
   private fontsLoaded = false;
+  private imageCaptureSub?: Subscription;
 
   constructor(
     private cdr: ChangeDetectorRef,
     private coreService: CoreService,
     public dialog: MatDialog,
     private imageSession: ImageSessionService
-  ) {}
+  ) {
+    this.imageCaptureSub = this.imageSession.captureRequest$.subscribe(
+      async ({ frameIndex, resolve }) => {
+        await this.waitUntilPlotReady(frameIndex);
+        await new Promise(r => requestAnimationFrame(() => r(null)));
+        await new Promise(r => setTimeout(r, 30));
+
+        const img = await this.CapturePlotImage();
+        resolve(img);
+      });
+  }
+
+  public waitUntilPlotReady(expectedFrame: number): Promise<boolean> {
+    return new Promise(resolve => {
+      if (this.lastRenderedFrameIndex === expectedFrame) {
+        resolve(true);
+        return;
+      }
+
+      let finished = false;
+      this.plotRenderResolver = (renderedFrame) => {
+        if (renderedFrame === expectedFrame && !finished) {
+          finished = true;
+          this.plotRenderResolver = undefined;
+          resolve(true);
+        }
+      };
+    });
+  }
 
   get visibleTracks(): PlotTrack[] {
     return this.lanes.length ? this.lanes : this.tracks;
@@ -809,6 +839,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   }
 
   ngOnDestroy(): void {
+    this.imageCaptureSub?.unsubscribe();
     this.resizeObserver?.disconnect();
     for (const token of this.pubSubTokens) {
       PubSub.unsubscribe?.(token);
