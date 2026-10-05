@@ -322,7 +322,6 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   ngAfterViewInit(): void {
     this.waveformSVG_Padding = this.getPadding(this.waveformsvg.nativeElement);
     this.observeSize();
-    this.setupZoom();
 
     this.pubSubTokens.push(PubSub.subscribe('EdgesAvailableResponse', (_msgType, msg: WaveformTypes_pb.EdgesAvailableResponse) => {
       if (msg) {
@@ -387,6 +386,8 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
           break;
       }
     }));
+
+    this.setupZoom();
   }
 
   getPadding(element: SVGElement): Padding {
@@ -1056,6 +1057,9 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   }
 
   private setupZoom(): void {
+    if (!this.waveformsvg?.nativeElement) {
+      return;
+    }
     this.disableEvents();
 
     const zoomCallbacks: D3ZoomHandlerCallbacks = {
@@ -1068,6 +1072,8 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       },
       onTransformEnd: async (finalTransform) => {
         if (!this.scalesReady) {
+          this.zoomHandler?.reset();
+          d3.select(this.waveformsvg.nativeElement).select('g.zoom-content').attr('transform', null);
           return;
         }
         const newDomain = finalTransform.rescaleX(this.xScale).domain() as [number, number];
@@ -1390,6 +1396,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     this.rebuildLanes(slot, slot);
     this.scalesReady = Number.isFinite(this.start) && Number.isFinite(this.stop) && this.stop > this.start;
     this.updateGrid();
+    d3.select(this.waveformsvg.nativeElement).select('g.zoom-content').attr('transform', null);
 
     if (this.edgeAvailableResponse)
       this.updatePlot();
