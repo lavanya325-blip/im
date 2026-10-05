@@ -1029,10 +1029,10 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         this.setupZoom();
         break;
       case 'move':
-        this.disableEvents();
-        this.activeTool = tool;
+        this.activeTool = 'move';
         this.selectEnabled = false;
         this.cursorEnabled = false;
+        this.setupZoom();
         break;
       case 'fit':
         this.onFitClick(event);
@@ -1125,10 +1125,9 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   onFitClick(event?: Event): void {
     event?.preventDefault();
     event?.stopPropagation();
-    this.start = this.fullDomain[0];
-    this.stop = this.fullDomain[1];
-    this.clampWindow();
-    void this.downloadRequiredData().then(() => this.resizePlot());
+    if (this.selectedFrame) {
+      void this.GotoTime(this.selectedFrame.StartTime, this.selectedFrame.EndTime);
+    }
   }
 
   onCursorEnableClick(_model: unknown, event?: Event): void {
@@ -1216,10 +1215,8 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       return;
     }
 
-    if (this.activeTool === 'select' || this.activeTool === 'pan') {
-      if (this.zoomHandler) {
-        return;
-      }
+    if ((this.activeTool === 'select' || this.activeTool === 'pan' || this.activeTool === 'move') && this.zoomHandler) {
+      return;
     }
 
     if (this.activeTool === 'select') {
@@ -1233,7 +1230,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       return;
     }
 
-    if (this.activeTool === 'pan' || this.activeTool === 'move') {
+    if (this.activeTool === 'pan') {
       this.dragging = true;
       event.preventDefault();
     }
