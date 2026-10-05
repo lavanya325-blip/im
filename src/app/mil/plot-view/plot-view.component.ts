@@ -24,11 +24,8 @@ import * as WaveformTypes_pb from '../../../protos/WaveformTypes';
 import * as CommonTypes_pb from '../../../protos/CommonTypes';
 import { CoreService } from '../../core/services/core.services';
 import * as DecoderTypes_pb from '../../../protos/DecoderTypes';
-import { ConfigurationDtos } from '../../core/dtos/app.config.service.dtos';
 import { PlotInfoDto, ProtocolFrameDto } from '../../core/dtos/result.service.dtos';
 import { HardwareStatus, HardwareStatusType } from '../../../protos/CaptureService';
-import * as annotationEx from '../extensions/result.annotations';
-import { processBusArray } from '../extensions/bus.extensions.i3c';
 
 export type PlotTool =
   | 'snapshot'
@@ -54,6 +51,28 @@ type PlotEntry = {
   channel?: CommonTypes_pb.Channels;
   allowSelection: boolean;
   selected: boolean;
+  subtitle: string;
+  protocolName?: string;
+};
+
+type MilChannelConfig = {
+  Name?: string;
+  Channel?: CommonTypes_pb.Channels;
+};
+
+type MilBusConfig = {
+  Name?: string;
+  ProtocolName?: string;
+  Channel?: CommonTypes_pb.Channels;
+};
+
+type MilRunConfig = {
+  ProtocolName?: string;
+  TriggerConfig?: { TriggerType?: unknown };
+  Channels?: MilChannelConfig[];
+  Buses?: MilBusConfig[];
+  BusA?: CommonTypes_pb.Channels;
+  BusB?: CommonTypes_pb.Channels;
 };
 
 declare const PubSub: {
@@ -76,11 +95,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   private pubSubTokens: string[] = [];
 
   getLegendDisplayName(plot: string) {
-    if (plot === 'SDA0' && Array.from(this.plotMap.values()).filter(p => p.name.startsWith('SDA') && p.selected).length === 1) {
-      return 'SDA';
-    }
-
-    return plot;
+    return this.plotMap.get(plot)?.name ?? plot;
   }
   triggerFound = false;
   hasValidData = false;
@@ -133,11 +148,10 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   private lastPointerX = 0;
   private lastPointerY = 0;
 
-  private configuration_I3C?: ConfigurationDtos;
   private downloadedDataStart?: number;
   private downloadedDataStop?: number;
   private minEdgeWidthIsFinal = false;
-  private configuration?: ConfigurationDtos;
+  private configuration?: MilRunConfig;
   private triggerEnabled = false;
 
   plotWidth = 800;
@@ -173,7 +187,6 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
 
   private triggerTime = 0;
   @Input() selectedFrame?: ProtocolFrameDto;
-  annotations: annotationEx.TextAnnotationModel[] = [];
 
   @Input() set TriggerTime(time: number) {
     this.triggerTime = time;
@@ -274,43 +287,14 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       }
       switch (msg.CurrentState) {
         case CommonTypes_pb.SystemStates.InitializeRun: {
-          this.configuration_I3C = await this.coreService.AppConfigService.getConfig();
-          this.configuration = this.configuration_I3C;
+          this.configuration = await this.coreService.AppConfigService.getConfig() as MilRunConfig;
 
-          console.log('PlotViewComponent:', this.configuration_I3C);
+          console.log('PlotViewComponent:', this.configuration);
 
-          this.triggerEnabled = false;
-          if (this.configuration_I3C?.TriggerConfig && this.configuration_I3C.TriggerConfig.TriggerType) {
-            this.triggerEnabled = true;
-          }
-
-          const scl = this.configuration_I3C?.SCL;
-          const sdaList = this.configuration_I3C?.SDAs ?? [];
-
-          if (this.plotMap.size === 0) {
-            if (scl != null) {
-              this.plotMap.set('SCL', { name: 'SCL', channel: scl, allowSelection: false, selected: true });
-            }
-
-            for (let index = 0; index < sdaList.length; index++) {
-              this.plotMap.set('SDA' + index, {
-                name: 'SDA' + index,
-                channel: sdaList[index],
-                allowSelection: index > 0,
-                selected: index == 0
-              });
-            }
-
-            if (this.configuration_I3C?.ProtocolName) {
-              this.plotMap.set('BUS', { name: this.configuration_I3C.ProtocolName, allowSelection: false, selected: true });
-            }
-          }
+          this.triggerEnabled = !!this.configuration?.TriggerConfig?.TriggerType;
+          this.applyMilConfiguration();
 
           console.log('Plot map', this.plotMap);
-
-          if (this.configuration_I3C?.ProtocolName && this.plotMap.has('BUS')) {
-            this.plotMap.get('BUS')!.name = this.configuration_I3C.ProtocolName;
-          }
 
           if (this.edgeAvailableResponse) {
             await this.updatePlotLimits();
@@ -326,7 +310,6 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
           this.hasValidData = false;
           this.hasData = false;
           this.lanes = [];
-          this.annotations = [];
           this.triggerEnabled = false;
           this.triggerFound = false;
           this.triggerTime = 0;
@@ -362,6 +345,114 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     }
   }
 
+  private applyMilConfiguration(): void {
+    if (!this.configuration) {
+      return;
+    }
+    this.addMilWaveformLanes(this.configuration);
+    this.addDecodeLanes(this.configuration);
+  }
+
+  private addMilWaveformLanes(config: MilRunConfig): void {
+    const lanes: { name: string; channel: CommonTypes_pb.Channels; subtitle: string; allowSelection: boolean }[] = [];
+    if (config.BusA != null) {
+      lanes.push({ name: 'Bus A', channel: config.BusA, subtitle: 'MIL 1553', allowSelection: false });
+    }
+    if (config.BusB != null) {
+      lanes.push({ name: 'Bus B', channel: config.BusB, subtitle: 'MIL 1553', allowSelection: false });
+    }
+    (config.Buses ?? []).forEach((bus, index) => {
+      if (bus.Channel == null) {
+        return;
+      }
+      lanes.push({
+        name: bus.Name?.trim() || `Bus ${String.fromCharCode(65 + index)}`,
+        channel: bus.Channel,
+        subtitle: 'MIL 1553',
+        allowSelection: false
+      });
+    });
+    (config.Channels ?? []).forEach((channel, index) => {
+      if (channel?.Channel == null) {
+        return;
+      }
+      lanes.push({
+        name: channel.Name?.trim() || `Channel ${index + 1}`,
+        channel: channel.Channel,
+        subtitle: 'Async',
+        allowSelection: true
+      });
+    });
+
+    lanes.forEach(lane => {
+      const channelId = lane.channel as unknown as number;
+      const existingKey = this.keyForChannel(channelId);
+      if (existingKey) {
+        const entry = this.plotMap.get(existingKey)!;
+        entry.name = lane.name;
+        entry.subtitle = lane.subtitle;
+        entry.allowSelection = lane.allowSelection;
+        return;
+      }
+      this.plotMap.set('CH' + channelId, {
+        name: lane.name,
+        channel: lane.channel,
+        allowSelection: lane.allowSelection,
+        selected: true,
+        subtitle: lane.subtitle
+      });
+    });
+  }
+
+  private addDecodeLanes(config: MilRunConfig): void {
+    const buses = config.Buses?.length
+      ? config.Buses.map((bus, index) => ({
+          name: bus.Name?.trim() || `Bus ${String.fromCharCode(65 + index)}`,
+          protocolName: bus.ProtocolName || config.ProtocolName
+        }))
+      : config.ProtocolName
+        ? [{ name: config.ProtocolName, protocolName: config.ProtocolName }]
+        : [];
+
+    const usedProtocols = new Set<string>();
+    this.plotMap.forEach(entry => {
+      if (entry.channel == null && entry.protocolName) {
+        usedProtocols.add(entry.protocolName);
+      }
+    });
+
+    buses.forEach((bus, index) => {
+      if (!bus.protocolName || usedProtocols.has(bus.protocolName)) {
+        return;
+      }
+      const key = 'BUS' + index;
+      const existing = this.plotMap.get(key);
+      if (existing && existing.channel == null) {
+        existing.name = bus.name;
+        existing.protocolName = bus.protocolName;
+        existing.subtitle = 'MIL 1553';
+      } else {
+        this.plotMap.set(key, {
+          name: bus.name,
+          allowSelection: false,
+          selected: true,
+          subtitle: 'MIL 1553',
+          protocolName: bus.protocolName
+        });
+      }
+      usedProtocols.add(bus.protocolName);
+    });
+  }
+
+  private keyForChannel(channelId: number): string | undefined {
+    for (const [key, entry] of this.plotMap) {
+      if (entry.channel != null && (entry.channel as unknown as number) === channelId) {
+        return key;
+      }
+    }
+    return undefined;
+  }
+
   private ensurePlotMapFromEdges(): void {
     if (!this.edgeAvailableResponse) {
       return;
@@ -378,16 +469,16 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         return;
       }
       this.plotMap.set('CH' + id, {
-        name: 'Channel ' + id,
+        name: 'Channel ' + (known.size + 1),
         channel: channel.Channel,
         allowSelection: true,
-        selected: true
+        selected: true,
+        subtitle: 'Async'
       });
       known.add(id);
     });
-    const protocolName = this.configuration_I3C?.ProtocolName || this.configuration?.ProtocolName;
-    if (protocolName && !this.plotMap.has('BUS')) {
-      this.plotMap.set('BUS', { name: protocolName, allowSelection: false, selected: true });
+    if (this.configuration) {
+      this.addDecodeLanes(this.configuration);
     }
   }
 
@@ -580,13 +671,13 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
 
       for (const busMapItem of this.busMap) {
         const bus = busMapItem[1];
-        const busInfo = this.plotMap.get(busMapItem[0]);
-        if (!busInfo?.name) {
+        const protocolName = this.plotMap.get(busMapItem[0])?.protocolName;
+        if (!protocolName) {
           continue;
         }
         let busResponseData: DecoderTypes_pb.PacketBus[] = [];
         try {
-          busResponseData = await this.requestBus(busInfo.name, startTime, stopTime);
+          busResponseData = await this.requestBus(protocolName, startTime, stopTime);
         } catch (error) {
           console.error('requestBus failed', busInfo.name, error);
         }
@@ -637,7 +728,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
 
       for (var busMapItem of this.busMap) {
         var bus = busMapItem[1];
-        var protocolName = this.configuration_I3C?.ProtocolName || this.plotMap.get(busMapItem[0])?.name;
+        var protocolName = this.plotMap.get(busMapItem[0])?.protocolName;
         if (!protocolName) {
           continue;
         }
@@ -658,33 +749,11 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         } else {
           appendedBus = busResponseData;
         }
-        appendedBus = this.relabelSetdasa(appendedBus);
         this.busMap.set(busMapItem[0], appendedBus);
         console.log('appendWaveformRequest: bus updated', appendedBus);
       }
     }
     this.downloadedDataStop = stopTime;
-  }
-
-  private relabelSetdasa(appendedBus: DecoderTypes_pb.PacketBus[]): DecoderTypes_pb.PacketBus[] {
-    const hasSetdasa = appendedBus.some(item => item.Content?.includes('SETDASA') || item.Content?.includes('SETNEWDA'));
-    const index = appendedBus.findIndex((item, idx) =>
-      hasSetdasa &&
-      (item.Content === 'ACK' || item.Content === 'NACK') &&
-      appendedBus[idx - 2]?.Content?.startsWith('DynAddr')
-    );
-    if (!hasSetdasa || index === -1) {
-      return appendedBus;
-    }
-    return appendedBus.map((item, idx) => {
-      if (idx === index - 1) {
-        return { ...item, Content: ' ' };
-      }
-      if (idx === index) {
-        return { ...item, Content: 'T' };
-      }
-      return item;
-    });
   }
 
   private async requestBus(name: string, startTime: number, stopTime: number) {
@@ -707,19 +776,6 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       } catch (error) {
         console.error('getEdges failed', channel, error);
       }
-    }
-
-    const sclChannel = this.configuration_I3C?.SCL ?? this.configuration?.SCL;
-    const sclEdges = sclChannel != null ? edgesMap.get(sclChannel) : undefined;
-    if (sclEdges?.Edges.length && this.edgeAvailableResponse && Math.abs(sclEdges.Edges[0] - this.edgeAvailableResponse.StartTime) <= 2 * EPS) {
-      edgesMap.forEach((value, key) => {
-        if (value.FirstEdge === WaveformTypes_pb.WaveEdgeType.FALL) {
-          value.FirstEdge = WaveformTypes_pb.WaveEdgeType.RISE;
-          value.Edges.unshift(this.edgeAvailableResponse!.StartTime);
-          edgesMap.set(key, value);
-          console.log('requestData(): Pull SCL / SDA HIGH 1st edge corrected');
-        }
-      });
     }
 
     return edgesMap;
@@ -1160,10 +1216,9 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       this.waveformSVG_Padding = this.getPadding(this.waveformsvg.nativeElement);
     }
 
-    var numberOfPlots = 0;
-    this.plotMap.forEach((p, k) => {
-      if (p.selected && k != 'BUS') numberOfPlots++;
-    });
+    const waveformCount = [...this.plotMap.values()].filter(entry => entry.selected && entry.channel != null).length;
+    const decodeCount = this.busPolygons.size;
+    const slots = Math.max(1, waveformCount + decodeCount);
 
     var clientRect = this.getInternalSizeExcludingPadding_SVG();
     const width = Math.max(1, clientRect.width || this.plotWidth);
@@ -1171,33 +1226,33 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     this.plotWidth = width;
     this.plotHeight = height;
 
-    var mapSize = Math.max(1, this.plotMap.size);
-    var busHeight = height / mapSize;
-    var channelHeight = numberOfPlots > 0 ? (height - busHeight) / numberOfPlots : height;
+    const slot = height / slots;
 
     const orderedChannels = [...this.channelPaths.entries()]
       .sort((a, b) => a[1].index - b[1].index);
 
     orderedChannels.forEach(([, v], i) => {
-      const lane = i + 1;
       v.yScale = d3.scaleLinear()
         .domain([-0.1, 1.1])
-        .range([lane * channelHeight, channelHeight * (lane - 1)]);
+        .range([(i + 1) * slot, i * slot]);
     });
 
-    this.busPolygons.forEach((v) => {
-      v.yScale = d3.scaleLinear().domain([-0.1, 1.1]).range([height, height - busHeight]);
-    });
+    [...this.busPolygons.entries()]
+      .sort((a, b) => a[1].index - b[1].index)
+      .forEach(([, v], i) => {
+        const lane = waveformCount + i;
+        v.yScale = d3.scaleLinear().domain([-0.1, 1.1]).range([(lane + 1) * slot, lane * slot]);
+      });
 
     this.xScale = d3.scaleLinear()
       .domain([this.start, this.stop])
       .range([0, width]);
 
     this.yScale = d3.scaleLinear()
-      .domain([0, numberOfPlots])
-      .range([height - busHeight, 0]);
+      .domain([0, Math.max(1, waveformCount)])
+      .range([Math.max(slot, waveformCount * slot), 0]);
 
-    this.rebuildLanes(channelHeight, busHeight);
+    this.rebuildLanes(slot, slot);
     this.scalesReady = Number.isFinite(this.start) && Number.isFinite(this.stop) && this.stop > this.start;
     this.updateGrid();
 
@@ -1219,7 +1274,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       rows.push({
         id,
         name: info?.name ?? id,
-        subtitle: 'Async',
+        subtitle: info?.subtitle ?? 'Async',
         color: LANE_COLORS[index % LANE_COLORS.length],
         kind: 'channel'
       });
@@ -1230,7 +1285,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       rows.push({
         id,
         name: info?.name ?? id,
-        subtitle: 'MIL 1553',
+        subtitle: info?.subtitle ?? 'MIL 1553',
         color: LANE_COLORS[(channels.length + index) % LANE_COLORS.length],
         kind: 'bus'
       });
@@ -1292,7 +1347,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       const busList = this.busMap.get(name) ?? [];
       const startIndex = d3.bisectLeft(busList.map(e => e.EndTime), visibleStart);
       const endIndex = d3.bisectRight(busList.map(e => e.StartTime), visibleStop);
-      const busArray = this.processBus(busList.slice(startIndex, endIndex));
+      const busArray = busList.slice(startIndex, endIndex);
 
       bus.polygons = busArray.map(p => ({
         center: BusExtensions.getPolygonCenter(p, this.xScale, bus.yScale),
@@ -1304,9 +1359,6 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       }));
     });
 
-    if (this.showBits) {
-      this.updateAnnotations(visibleStart, visibleStop);
-    }
     queueMicrotask(() => {
       const frameIndex = this.currentFrameIndex;
       if (frameIndex == null) {
@@ -1326,55 +1378,6 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       width: size.width - padding.left - padding.right,
       height: size.height - padding.top - padding.bottom
     };
-  }
-
-  private processBus(busArray: DecoderTypes_pb.PacketBus[]) {
-    const scl = this.configuration_I3C?.SCL ?? this.configuration?.SCL;
-    if (scl == null) {
-      return busArray;
-    }
-    const clkEdgeData = this.waveforms.get(scl);
-    if (!clkEdgeData) {
-      return busArray;
-    }
-    return processBusArray(busArray, clkEdgeData);
-  }
-
-  private updateAnnotations(visibleStart: number, visibleStop: number): void {
-    const scl = this.configuration?.SCL ?? this.configuration_I3C?.SCL;
-    const sdas = this.configuration?.SDAs ?? this.configuration_I3C?.SDAs;
-    if (!this.selectedFrame || scl == null || !sdas?.length) {
-      return;
-    }
-    let clkEdgeData = this.waveforms.get(scl);
-    if (!clkEdgeData) {
-      return;
-    }
-    const startIndex = this.bisector.left(clkEdgeData, visibleStart);
-    const endIndex = this.bisector.right(clkEdgeData, visibleStop);
-    clkEdgeData = clkEdgeData.slice(startIndex, endIndex);
-    const dat0EdgeData = this.waveforms.get(sdas[0]);
-    const positions: number[] = [];
-    this.plotMap.forEach((entry, key) => {
-      if (key === 'BUS') {
-        return;
-      }
-      if (entry.selected) {
-        const yScale = this.channelPaths.get(key)?.yScale;
-        positions.push(yScale ? this.yScale.invert(yScale(0.5)) : Number.NaN);
-      } else {
-        positions.push(Number.NaN);
-      }
-    });
-    this.annotations = annotationEx.GetBitAnnotations(
-      this.selectedFrame,
-      clkEdgeData,
-      dat0EdgeData!,
-      positions[1],
-      positions[2],
-      positions[3],
-      positions[4]
-    );
   }
 
   get currentFrameIndex(): number | undefined {
