@@ -17,7 +17,7 @@
     </div>
   </header>
 
-  <div class="manipulation-tools" role="toolbar" aria-label="Plot operations">
+  <div class="manipulation-tools" role="toolbar" aria-label="Plot operations" [hidden]="hideControls">
     <button
       *ngFor="let tool of tools"
       type="button"
@@ -39,7 +39,7 @@
     </button>
   </div>
 
-  <div class="plot-body">
+  <div class="plot-body" #plotCapture>
     <div class="lane-rail">
       <div class="lane-label" *ngFor="let track of visibleTracks; trackBy: trackTrack" [style.height.px]="laneHeight(track)">
         <span class="lane-bar" [style.background]="track.color"></span>

@@ -14,11 +14,16 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatIconModule } from '@angular/material/icon';
+import { MatDialog } from '@angular/material/dialog';
 import * as d3 from 'd3';
 import { Mutex } from 'async-mutex';
+import html2canvas from 'html2canvas';
 import { BusPolygon, PlotTrack, Point } from './models/plot-track.model';
 import { toEngineeringTime, toPoints } from './extensions/plot-extensions';
 import { BusExtensions } from './extensions/bus-extensions';
+import { SaveImageComponent } from './components/save-image/save-image.component';
+import { ImageSessionService } from './services/image-session.service';
+import { GenericDialogComponent } from '../../shared/components/generic-dialog/generic-dialog.component';
 
 import * as WaveformTypes_pb from '../../../protos/WaveformTypes';
 import * as CommonTypes_pb from '../../../protos/CommonTypes';
@@ -89,6 +94,7 @@ declare const PubSub: {
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
+  @ViewChild('plotCapture') plotCapture?: ElementRef<HTMLElement>;
   @ViewChild('waveformContainer') waveformContainer?: ElementRef<HTMLElement>;
   @ViewChild('waveformsvg', { static: true }) waveformsvg!: ElementRef<SVGElement>;
   private waveformSVG_Padding!: Padding;
@@ -117,7 +123,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   private laneHeights = new Map<string, number>();
 
   readonly tools: { id: string; icon: string; label: string; order: number }[] = [
-    { id: 'snapshot', icon: 'camera_alt', label: 'Camera', order: 0 },
+    { id: 'snapshot', icon: 'camera_alt', label: 'Save Image', order: 0 },
     { id: 'expand', icon: 'open_in_full', label: 'Expand', order: 1 },
     { id: 'select', icon: 'mouse', label: 'Mouse', order: 2 },
     { id: 'zoomIn', icon: 'zoom_in', label: 'Zoom in', order: 3 },
@@ -196,7 +202,15 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     return this.triggerTime;
   }
 
-  constructor(private cdr: ChangeDetectorRef, private coreService: CoreService) {}
+  hideControls = false;
+  private fontsLoaded = false;
+
+  constructor(
+    private cdr: ChangeDetectorRef,
+    private coreService: CoreService,
+    public dialog: MatDialog,
+    private imageSession: ImageSessionService
+  ) {}
 
   get visibleTracks(): PlotTrack[] {
     return this.lanes.length ? this.lanes : this.tracks;
@@ -985,7 +999,13 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   }
 
   SaveImage(): void {
-    this.capturePlot();
+    const dialogRef = this.dialog.open(SaveImageComponent);
+
+    dialogRef.afterClosed().subscribe((result: { filePath: string; fileName: string }) => {
+      if (result?.filePath && result?.fileName) {
+        void this.capturePlot(result.filePath, result.fileName);
+      }
+    });
   }
 
   waveformMousemove(event: MouseEvent): void {
@@ -1384,63 +1404,98 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     return this.selectedFrame?.Index;
   }
 
-  private capturePlot(): void {
-    const svg = this.waveformsvg?.nativeElement;
-    if (!svg) {
-      return;
-    }
-    const clone = svg.cloneNode(true) as SVGSVGElement;
-    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-    clone.setAttribute('width', String(this.plotWidth));
-    clone.setAttribute('height', String(this.plotHeight));
-    const style = document.createElementNS('http://www.w3.org/2000/svg', 'style');
-    style.textContent = `
-      .grid-line { stroke: #3F3F46; stroke-width: 0.5; stroke-dasharray: 3 4; }
-      .lane-sep { stroke-dasharray: none; }
-      .wave-path { fill: none; stroke-width: 1.5; }
-      .bus-poly { fill-opacity: 0.92; stroke: rgba(255,255,255,0.35); }
-      .bus-text { fill: #fff; font-size: 10px; text-anchor: middle; }
-      .axis-label { fill: #A1A1AA; font-size: 10px; text-anchor: middle; }
-    `;
-    clone.insertBefore(style, clone.firstChild);
-    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    bg.setAttribute('width', '100%');
-    bg.setAttribute('height', '100%');
-    bg.setAttribute('fill', '#1F1F22');
-    clone.insertBefore(bg, clone.firstChild);
+  async capturePlot(filePath: string, fileName: string) {
+    this.hideControls = true;
+    this.cdr.detectChanges();
+    try {
+      await document.fonts.ready;
+      const element = this.plotCapture?.nativeElement ?? this.waveformContainer?.nativeElement;
+      if (!element) {
+        return;
+      }
+      const canvas = await html2canvas(element, {
+        backgroundColor: '#1f1f22',
+        scale: 2,
+        removeContainer: true,
+        useCORS: true
+      });
+      const imageBase64 = canvas.toDataURL('image/png').split(',')[1];
 
-    const blob = new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const image = new Image();
-    image.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = this.plotWidth;
-      canvas.height = this.plotHeight;
-      canvas.getContext('2d')?.drawImage(image, 0, 0);
-      canvas.toBlob(png => {
-        if (!png) {
+      this.hideControls = false;
+      this.cdr.detectChanges();
+      const fullPath = `${filePath}/${fileName}`;
+      const response = await this.coreService.FileService.FileSave({
+        Filename: fullPath,
+        Content: imageBase64,
+        IsBinary: true
+      });
+      if (response.Success) {
+        this.dialog.open(GenericDialogComponent, {
+          data: {
+            title: 'Plot Saved Successfully',
+            message: `Plot Image saved at: ${fullPath}`,
+            icon: 'success',
+            buttons: [{ text: 'Close', value: false }]
+          },
+          backdropClass: 'custom-dialog-backdrop'
+        });
+        this.imageSession.addImage({
+          imagePath: fullPath,
+          isIncluded: true,
+          description: ''
+        });
+        const readFileResponse = await this.coreService.FileService.ReadFile({
+          Filename: fullPath,
+          IsBinary: true
+        });
+        if (readFileResponse.Success === true) {
+          this.imageSession.updateImageBase64(fullPath, readFileResponse.Content);
+        } else {
+          console.error(readFileResponse.Error);
           return;
         }
-        const pngUrl = URL.createObjectURL(png);
-        const link = document.createElement('a');
-        link.href = pngUrl;
-        link.download = 'plot-view.png';
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        URL.revokeObjectURL(pngUrl);
-        URL.revokeObjectURL(url);
-      }, 'image/png');
-    };
-    image.onerror = () => {
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'plot-view.svg';
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    };
-    image.src = url;
+      } else {
+        console.error('File save failed');
+      }
+    } catch (err) {
+      console.error('Failed to capture or save image:', err);
+    } finally {
+      this.hideControls = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  async CapturePlotImage(): Promise<string | undefined> {
+    try {
+      this.hideControls = true;
+      this.cdr.detectChanges();
+
+      if (!this.fontsLoaded) {
+        await document.fonts.ready;
+        this.fontsLoaded = true;
+      }
+
+      const element = this.plotCapture?.nativeElement ?? this.waveformContainer?.nativeElement;
+      if (!element) {
+        return undefined;
+      }
+
+      const canvas = await html2canvas(element, {
+        backgroundColor: '#1f1f22',
+        scale: 2,
+        removeContainer: true,
+        logging: false,
+        imageTimeout: 0,
+        useCORS: true,
+      });
+
+      return canvas.toDataURL('image/png').split(',')[1];
+    } catch (err) {
+      console.error('CapturePlotImage error:', err);
+      return undefined;
+    } finally {
+      this.hideControls = false;
+      this.cdr.detectChanges();
+    }
   }
 }

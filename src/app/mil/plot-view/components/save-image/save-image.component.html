@@ -1,0 +1,45 @@
+<mat-dialog-content>
+    <div class="mod-modal">
+
+        <div class="mod-modal__overlay"></div>
+
+        <div class="mod-modal__inner ">
+
+            <!-- Modal Title and Close Button -->
+            <div class="mod-block-title">
+                <div class="mod-block-title__text text-18 font-md"> Save Plot Image</div>
+                <button class="mod-modal__close" (click)="onClose()">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="none" viewBox="0 0 12 12">
+                        <path stroke="#000" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                            d="M1 11.243 6.243 6l5.243 5.243m0-10.486L6.242 6 1 .757" />
+                    </svg>
+                </button>
+            </div>
+
+            <div mat-dialog-content>
+                <fieldset class="groupbox">
+                    <legend class="mod-block__sub-title-Reg groupbox-legend">Save Image</legend>
+
+                    <ng-content>
+                        <div class="groupbox-content">
+                            <!-- <mat-checkbox [(ngModel)]="SaveTraces"></mat-checkbox> -->
+
+                            <label class="input-box-label">File Path:</label>
+                            <input [(ngModel)]="filePath" matInput class="input-box" [disabled]="true">
+                            <button style="align-self: center;" color="primary" mat-raised-button
+                                matTooltip="Browse" (click)="btnBrowseClick($event)" class="browse-button">...</button>
+                        </div>
+                    </ng-content>
+                </fieldset>
+                <div class="button-container">
+                    <button class="button-container-item" mat-raised-button color="primary" (click)="saveNow()" 
+                         matTooltip="Autosave now to autosave path">Save Now</button>
+                    <button class="button-container-item" mat-raised-button color="primary" (click)="browseAndSave()" 
+                         matTooltip="Save to user defined location, autosave path will not be effected ">Save As</button>
+                    <button class="button-container-item" mat-raised-button color="default" (click)="onClose()"
+                        matTooltip="Save to user defined location, autosave path will not be effected ">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</mat-dialog-content>
