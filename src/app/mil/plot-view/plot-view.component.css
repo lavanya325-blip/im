@@ -1,0 +1,169 @@
+:host {
+  display: block;
+  height: 100%;
+  color: #e4e4e7;
+  background: #1f1f22;
+}
+
+:host.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+
+.plot-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 420px;
+}
+
+.plot-header,
+.manipulation-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+.plot-title {
+  font-weight: 600;
+}
+
+.plot-header-actions,
+.manipulation-tools {
+  margin-left: auto;
+}
+
+.manipulation-tools {
+  margin-left: 0;
+}
+
+.icon-btn,
+.tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+}
+
+.icon-btn svg,
+.tool-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.tool-btn.is-active,
+.icon-btn.is-active {
+  background: #3f3f46;
+}
+
+.plot-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.lane-rail {
+  width: 148px;
+  flex: none;
+  border-right: 1px solid #3f3f46;
+}
+
+.lane-label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 0 8px;
+  box-sizing: border-box;
+}
+
+.lane-bar,
+.swatch {
+  width: 4px;
+  align-self: stretch;
+  border-radius: 2px;
+}
+
+.swatch {
+  width: 8px;
+  height: 8px;
+  align-self: center;
+}
+
+.lane-name {
+  font-size: 13px;
+}
+
+.lane-sub {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: #a1a1aa;
+  font-size: 11px;
+}
+
+.waveform-container {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.waveform-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #1f1f22;
+}
+
+.grid-line {
+  stroke: #3f3f46;
+  stroke-width: 0.5;
+  stroke-dasharray: 3 4;
+}
+
+.lane-sep {
+  stroke-dasharray: none;
+}
+
+.wave-path {
+  fill: none;
+  stroke-width: 1.5;
+}
+
+.bus-poly {
+  fill-opacity: 0.92;
+  stroke: rgba(255, 255, 255, 0.35);
+}
+
+.bus-text,
+.axis-label,
+.no-data_label {
+  fill: #fff;
+  font-size: 10px;
+}
+
+.axis-label,
+.no-data_label {
+  fill: #a1a1aa;
+}
+
+.zoom-overlay {
+  fill: rgba(91, 155, 213, 0.25);
+  stroke: #5b9bd5;
+}
+
+.cursor-line {
+  stroke: #f5c518;
+  stroke-width: 1;
+}
+
+.marker-line {
+  stroke: #f472b6;
+  stroke-width: 1;
+}
