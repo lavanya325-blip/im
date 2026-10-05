@@ -362,34 +362,77 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     }
   }
 
+  private ensurePlotMapFromEdges(): void {
+    if (!this.edgeAvailableResponse) {
+      return;
+    }
+    const known = new Set<number>();
+    this.plotMap.forEach(entry => {
+      if (entry.channel != null) {
+        known.add(entry.channel as unknown as number);
+      }
+    });
+    this.edgeAvailableResponse.ChannelEdgeAvailable.forEach(channel => {
+      const id = channel.Channel as unknown as number;
+      if (id == null || known.has(id)) {
+        return;
+      }
+      this.plotMap.set('CH' + id, {
+        name: 'Channel ' + id,
+        channel: channel.Channel,
+        allowSelection: true,
+        selected: true
+      });
+      known.add(id);
+    });
+    const protocolName = this.configuration_I3C?.ProtocolName || this.configuration?.ProtocolName;
+    if (protocolName && !this.plotMap.has('BUS')) {
+      this.plotMap.set('BUS', { name: protocolName, allowSelection: false, selected: true });
+    }
+  }
+
+  private seedSeriesFromPlotMap(): void {
+    let index = 1;
+    this.plotMap.forEach((entry, key) => {
+      if (!entry.selected) {
+        return;
+      }
+      if (entry.channel != null) {
+        if (!this.waveforms.has(entry.channel)) {
+          this.waveforms.set(entry.channel, []);
+        }
+        const existing = this.channelPaths.get(key);
+        if (existing) {
+          existing.index = index++;
+        } else {
+          this.channelPaths.set(key, { index: index++, channel: entry.channel, yScale: d3.scaleLinear(), path: '' });
+        }
+      } else {
+        if (!this.busMap.has(key)) {
+          this.busMap.set(key, []);
+        }
+        const existing = this.busPolygons.get(key);
+        if (existing) {
+          existing.index = index++;
+        } else {
+          this.busPolygons.set(key, { index: index++, yScale: d3.scaleLinear(), polygons: [] });
+        }
+      }
+    });
+  }
+
   private async updatePlotLimits() {
     console.log('edges came');
     if (!(this.edgeAvailableResponse && this.edgeAvailableResponse.ChannelEdgeAvailable.length > 0)) {
       return;
     }
 
-    if (this.waveforms.size == 0) {
-      if (this.plotMap.size == 0) {
-        return;
-      }
-
-      var index = 1;
-      this.plotMap.forEach((v, k) => {
-        if (v.selected == false) {
-          return;
-        }
-
-        if (v.channel != null) {
-          this.waveforms.set(v.channel, []);
-          this.channelPaths.set(k, { index: index++, channel: v.channel, yScale: d3.scaleLinear(), path: '' });
-        } else {
-          this.busMap.set(k, []);
-          this.busPolygons.set(k, { index: index++, yScale: d3.scaleLinear(), polygons: [] });
-        }
-      });
-
-      console.log('update limits plots added', this.plotMap);
+    this.ensurePlotMapFromEdges();
+    if (this.plotMap.size == 0) {
+      return;
     }
+    this.seedSeriesFromPlotMap();
+    console.log('update limits plots added', this.plotMap);
 
     var dataStart = this.edgeAvailableResponse.StartTime;
     var dataEnd = this.edgeAvailableResponse.EndTime;
@@ -411,19 +454,22 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         this.minEdgeWidthIsFinal = true;
       }
 
-      var response = await this.coreService.ResultService.getEdges({ Channel: channelWithMoreEdges.Channel, IndexBased: { Offset: 0, Count: edgeCount } });
-
-      var edges = response!.Edges!;
-      var difference = edges!.Edges
-        .map((d: number, i: number, arr: number[]) => (i > 0 ? d - arr[i - 1] : null))
-        .slice(1);
-
-      var [minEdgeWidth, maxEdgeWidth] = d3.extent(difference.filter((v): v is number => v != null && v > 0));
-      if (typeof minEdgeWidth === 'number' && minEdgeWidth > 0) {
-        this.minEdgeWidth = minEdgeWidth;
+      let minEdgeWidth: number | undefined;
+      let maxEdgeWidth: number | undefined;
+      try {
+        var response = await this.coreService.ResultService.getEdges({ Channel: channelWithMoreEdges.Channel, IndexBased: { Offset: 0, Count: edgeCount } });
+        var edgeList = response?.Edges?.Edges ?? [];
+        var difference = edgeList
+          .map((d: number, i: number, arr: number[]) => (i > 0 ? d - arr[i - 1] : null))
+          .slice(1);
+        [minEdgeWidth, maxEdgeWidth] = d3.extent(difference.filter((v): v is number => v != null && v > 0));
+        if (typeof minEdgeWidth === 'number' && minEdgeWidth > 0) {
+          this.minEdgeWidth = minEdgeWidth;
+        }
+        console.log('update min/ max edges', minEdgeWidth, maxEdgeWidth, this.start, this.stop, 'channel', channelWithMoreEdges.Channel, 'firstedge', response?.Edges?.FirstEdge);
+      } catch (error) {
+        console.error('min edge sample failed', error);
       }
-
-      console.log('update min/ max edges', minEdgeWidth, maxEdgeWidth, this.start, this.stop, 'channel', channelWithMoreEdges.Channel, 'firstedge', edges?.FirstEdge);
 
       if ((this.downloadedDataStart === undefined && this.downloadedDataStop === undefined)) {
         this.start = dataStart;
@@ -439,16 +485,17 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         console.error('downloadRequiredData failed', error);
       }
 
-      if (this.downloadedDataStart === downloadedStart && this.downloadedDataStop === downloadedStop) {
+      const hasPoints = [...this.waveforms.values()].some(points => points.length > 0)
+        || [...this.busMap.values()].some(packets => packets.length > 0);
+      if (this.downloadedDataStart === downloadedStart && this.downloadedDataStop === downloadedStop && !hasPoints) {
         return;
       }
 
-      if (this.hasValidData == false) {
+      if (hasPoints) {
         this.hasValidData = true;
+        this.hasData = true;
+        this.resizePlot();
       }
-      this.hasData = true;
-
-      this.resizePlot();
     }
   }
 
@@ -537,7 +584,12 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         if (!busInfo?.name) {
           continue;
         }
-        const busResponseData = await this.requestBus(busInfo.name, startTime, stopTime);
+        let busResponseData: DecoderTypes_pb.PacketBus[] = [];
+        try {
+          busResponseData = await this.requestBus(busInfo.name, startTime, stopTime);
+        } catch (error) {
+          console.error('requestBus failed', busInfo.name, error);
+        }
         let prependedBus: DecoderTypes_pb.PacketBus[] = bus;
         if (bus.length > 0) {
           if (busResponseData.length > 0) {
@@ -590,7 +642,12 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
           continue;
         }
 
-        var busResponseData = await this.requestBus(protocolName, startTime, stopTime);
+        let busResponseData: DecoderTypes_pb.PacketBus[] = [];
+        try {
+          busResponseData = await this.requestBus(protocolName, startTime, stopTime);
+        } catch (error) {
+          console.error('requestBus failed', protocolName, error);
+        }
 
         let appendedBus: DecoderTypes_pb.PacketBus[] = bus;
         if (bus.length > 0) {
@@ -639,12 +696,16 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     const edgesMap: Map<CommonTypes_pb.Channels, WaveformTypes_pb.EdgeCollection> = new Map();
 
     for (const channel of this.waveforms.keys()) {
-      const edgeResponse = await this.coreService.ResultService.getEdges({
-        Channel: channel,
-        TimeBased: { StartTime: startTime, EndTime: stopTime }
-      });
-      if (edgeResponse?.Edges) {
-        edgesMap.set(channel, edgeResponse.Edges);
+      try {
+        const edgeResponse = await this.coreService.ResultService.getEdges({
+          Channel: channel,
+          TimeBased: { StartTime: startTime, EndTime: stopTime }
+        });
+        if (edgeResponse?.Edges) {
+          edgesMap.set(channel, edgeResponse.Edges);
+        }
+      } catch (error) {
+        console.error('getEdges failed', channel, error);
       }
     }
 
@@ -1105,12 +1166,14 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     });
 
     var clientRect = this.getInternalSizeExcludingPadding_SVG();
-    this.plotWidth = Math.max(1, clientRect.width || this.plotWidth);
-    this.plotHeight = Math.max(1, clientRect.height || this.plotHeight);
+    const width = Math.max(1, clientRect.width || this.plotWidth);
+    const height = Math.max(this.minContentHeight(), clientRect.height || this.plotHeight);
+    this.plotWidth = width;
+    this.plotHeight = height;
 
     var mapSize = Math.max(1, this.plotMap.size);
-    var busHeight = clientRect.height / mapSize;
-    var channelHeight = numberOfPlots > 0 ? (clientRect.height - busHeight) / numberOfPlots : clientRect.height;
+    var busHeight = height / mapSize;
+    var channelHeight = numberOfPlots > 0 ? (height - busHeight) / numberOfPlots : height;
 
     const orderedChannels = [...this.channelPaths.entries()]
       .sort((a, b) => a[1].index - b[1].index);
@@ -1123,16 +1186,16 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     });
 
     this.busPolygons.forEach((v) => {
-      v.yScale = d3.scaleLinear().domain([-0.1, 1.1]).range([clientRect.height, clientRect.height - busHeight]);
+      v.yScale = d3.scaleLinear().domain([-0.1, 1.1]).range([height, height - busHeight]);
     });
 
     this.xScale = d3.scaleLinear()
       .domain([this.start, this.stop])
-      .range([0, clientRect.width]);
+      .range([0, width]);
 
     this.yScale = d3.scaleLinear()
       .domain([0, numberOfPlots])
-      .range([clientRect.height - busHeight, 0]);
+      .range([height - busHeight, 0]);
 
     this.rebuildLanes(channelHeight, busHeight);
     this.scalesReady = Number.isFinite(this.start) && Number.isFinite(this.stop) && this.stop > this.start;
