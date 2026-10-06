@@ -296,6 +296,10 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   async GotoTime(startTime: number, stopTime: number) {
     console.log('zoom to time');
 
+    if (!Number.isFinite(startTime) || !Number.isFinite(stopTime) || stopTime <= startTime) {
+      return;
+    }
+
     let start = startTime;
     let stop = stopTime;
 
@@ -303,7 +307,14 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     start -= (0.05 * diff) - EPS;
     stop += (0.05 * diff);
 
+    this.zoomHandler?.reset();
+    this.zoomStateService?.updateTransform(d3.zoomIdentity);
+    if (this.waveformsvg?.nativeElement) {
+      d3.select(this.waveformsvg.nativeElement).select('g.zoom-content').attr('transform', null);
+    }
+
     if (this.start === start && this.stop === stop) {
+      this.resizePlot();
       return;
     }
 
@@ -1131,9 +1142,16 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   onFitClick(event?: Event): void {
     event?.preventDefault();
     event?.stopPropagation();
-    if (this.selectedFrame) {
-      void this.GotoTime(this.selectedFrame.StartTime, this.selectedFrame.EndTime);
+
+    const frame = this.selectedFrame;
+    if (frame && frame.EndTime > frame.StartTime) {
+      void this.GotoTime(frame.StartTime, frame.EndTime);
+      return;
     }
+
+    const begin = this.edgeAvailableResponse?.StartTime ?? this.fullDomain[0];
+    const end = this.edgeAvailableResponse?.EndTime ?? this.fullDomain[1];
+    void this.GotoTime(begin, end);
   }
 
   onCursorEnableClick(_model: unknown, event?: Event): void {
