@@ -17,7 +17,7 @@
     </div>
   </header>
 
-  <div class="manipulation-tools" role="toolbar" aria-label="Plot operations">
+  <div class="manipulation-tools" role="toolbar" aria-label="Plot operations" [hidden]="hideControls">
     <button
       *ngFor="let tool of tools"
       type="button"
@@ -39,7 +39,7 @@
     </button>
   </div>
 
-  <div class="plot-body">
+  <div class="plot-body" #plotCapture>
     <div class="lane-rail">
       <div class="lane-label" *ngFor="let track of visibleTracks; trackBy: trackTrack" [style.height.px]="laneHeight(track)">
         <span class="lane-bar" [style.background]="track.color"></span>
@@ -67,14 +67,6 @@
       >
         <g class="grid" *ngIf="gridEnabled">
           <line
-            *ngFor="let line of gridLines"
-            [attr.x1]="line.x"
-            [attr.x2]="line.x"
-            y1="0"
-            [attr.y2]="plotHeight - axisHeight"
-            class="grid-line"
-          ></line>
-          <line
             *ngFor="let track of visibleTracks; let i = index; trackBy: trackTrack"
             x1="0"
             [attr.x2]="plotWidth"
@@ -93,6 +85,14 @@
               [attr.d]="path.path"
               [attr.stroke]="path.color"
             ></path>
+
+            <text
+              *ngFor="let bit of bitLabels"
+              class="bit-label"
+              text-anchor="middle"
+              [attr.x]="bit.x"
+              [attr.y]="bit.y"
+            >{{ bit.text }}</text>
 
             <g *ngFor="let bus of busPolygonList">
               <g *ngFor="let polygon of bus.polygons">
@@ -159,16 +159,14 @@
             [attr.y1]="plotHeight - axisHeight"
             [attr.y2]="plotHeight - axisHeight"
           ></line>
-          <ng-container *ngIf="hasValidData || hasData">
-            <text
-              *ngFor="let line of gridLines"
-              class="axis-label"
-              [attr.x]="line.x"
-              [attr.y]="plotHeight - 6"
-            >{{ line.label }}</text>
-          </ng-container>
         </g>
       </svg>
+      <plot-grid
+        class="plot-grid"
+        [xScale]="xScale"
+        [TriggerTime]="TriggerTime"
+        [Enabled]="gridEnabled">
+      </plot-grid>
     </div>
   </div>
 </section>

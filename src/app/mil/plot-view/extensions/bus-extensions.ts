@@ -1,6 +1,6 @@
 import * as d3 from 'd3';
 import * as DecoderTypes_pb from '../../../../protos/DecoderTypes';
-import { Point } from '../models/plot-track.model';
+import { Point } from '../../models/plot.model';
 
 export class BusExtensions {
   static getPolygon(

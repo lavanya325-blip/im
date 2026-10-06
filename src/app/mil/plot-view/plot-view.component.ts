@@ -6,6 +6,7 @@ import {
   ElementRef,
   HostBinding,
   HostListener,
+  inject,
   Input,
   OnChanges,
   OnDestroy,
@@ -14,11 +15,17 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatIconModule } from '@angular/material/icon';
+import { PlotGrid } from './components/plot-grid/plot-grid-component';
+import { MatDialog } from '@angular/material/dialog';
 import * as d3 from 'd3';
 import { Mutex } from 'async-mutex';
-import { BusPolygon, PlotTrack, Point } from './models/plot-track.model';
-import { toEngineeringTime, toPoints } from './extensions/plot-extensions';
+import { Subscription } from 'rxjs';
+import { Point } from '../models/plot.model';
+import { toPoints } from './extensions/plot-extensions';
 import { BusExtensions } from './extensions/bus-extensions';
+import { ImageSessionService } from './services/image-session.service';
+import { D3ZoomHandler, D3ZoomHandlerCallbacks } from './services/zoom-handler';
+import { ZoomStateService } from './services/zoom-state.service';
 
 import * as WaveformTypes_pb from '../../../protos/WaveformTypes';
 import * as CommonTypes_pb from '../../../protos/CommonTypes';
@@ -27,6 +34,34 @@ import * as DecoderTypes_pb from '../../../protos/DecoderTypes';
 import { PlotInfoDto, ProtocolFrameDto } from '../../core/dtos/result.service.dtos';
 import { HardwareStatus, HardwareStatusType } from '../../../protos/CaptureService';
 
+export function toEngineeringTime(seconds: number): string {
+  const abs = Math.abs(seconds);
+  if (abs >= 1e-3) {
+    return `${(seconds * 1e3).toFixed(3)} ms`;
+  }
+  return `${(seconds * 1e6).toFixed(3)} µs`;
+}
+export interface PlotTrack {
+  id: string;
+  name: string;
+  subtitle: string;
+  color: string;
+  kind: 'bus' | 'channel';
+}
+export interface BusPolygon {
+  center: Point;
+  path: string;
+  content: string;
+  styleClass: string;
+  startTime: number;
+  endTime: number;
+}
+export interface BitLabel {
+  id: string;
+  x: number;
+  y: number;
+  text: string;
+}
 export type PlotTool =
   | 'snapshot'
   | 'expand'
@@ -38,6 +73,7 @@ export type PlotTool =
   | 'move'
   | 'cursor'
   | 'grid'
+  | 'bits'
   | 'flag';
 
 const EPS = 1e-12;
@@ -83,12 +119,13 @@ declare const PubSub: {
 @Component({
   selector: 'app-plot-view',
   standalone: true,
-  imports: [CommonModule, MatIconModule],
+  imports: [CommonModule, MatIconModule, PlotGrid],
   templateUrl: './plot-view.component.html',
   styleUrl: './plot-view.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
+  @ViewChild('plotCapture') plotCapture?: ElementRef<HTMLElement>;
   @ViewChild('waveformContainer') waveformContainer?: ElementRef<HTMLElement>;
   @ViewChild('waveformsvg', { static: true }) waveformsvg!: ElementRef<SVGElement>;
   private waveformSVG_Padding!: Padding;
@@ -103,6 +140,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   yScale!: d3.ScaleLinear<number, number>;
   private scalesReady = false;
   showBits = false;
+  bitLabels: BitLabel[] = [];
 
   readonly tracks: PlotTrack[] = [
     { id: 'busA', name: 'Bus A', subtitle: 'MIL 1553', color: '#5B9BD5', kind: 'bus' },
@@ -124,9 +162,9 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     { id: 'zoomOut', icon: 'zoom_out', label: 'Zoom out', order: 4 },
     { id: 'pan', icon: 'pan_tool', label: 'Pan', order: 5 },
     { id: 'move', icon: 'open_with', label: 'Drag pan', order: 6 },
-    { id: 'cursor', icon: 'calendar_month', label: 'Calendar', order: 7 },
+    { id: 'fit', icon: 'calendar_month', label: 'Fit', order: 7 },
     { id: 'grid', icon: 'grid_3x3', label: 'Grid', order: 8 },
-    { id: 'flag', icon: 'table_chart', label: 'Table view', order: 9 }
+    { id: 'bits', icon: 'table_chart', label: 'Bits', order: 9 }
   ];
 
   hasData = false;
@@ -196,7 +234,35 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     return this.triggerTime;
   }
 
-  constructor(private cdr: ChangeDetectorRef, private coreService: CoreService) {}
+  hideControls = false;
+  private fontsLoaded = false;
+  private imageCaptureSub?: Subscription;
+  private readonly dialog = inject(MatDialog, { optional: true });
+  private readonly imageSession = inject(ImageSessionService, { optional: true });
+  private readonly zoomStateService = inject(ZoomStateService, { optional: true });
+
+  constructor(
+    private cdr: ChangeDetectorRef,
+    private coreService: CoreService
+  ) {}
+
+  public waitUntilPlotReady(expectedFrame: number): Promise<boolean> {
+    return new Promise(resolve => {
+      if (this.lastRenderedFrameIndex === expectedFrame) {
+        resolve(true);
+        return;
+      }
+
+      let finished = false;
+      this.plotRenderResolver = (renderedFrame) => {
+        if (renderedFrame === expectedFrame && !finished) {
+          finished = true;
+          this.plotRenderResolver = undefined;
+          resolve(true);
+        }
+      };
+    });
+  }
 
   get visibleTracks(): PlotTrack[] {
     return this.lanes.length ? this.lanes : this.tracks;
@@ -230,6 +296,10 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   async GotoTime(startTime: number, stopTime: number) {
     console.log('zoom to time');
 
+    if (!Number.isFinite(startTime) || !Number.isFinite(stopTime) || stopTime <= startTime) {
+      return;
+    }
+
     let start = startTime;
     let stop = stopTime;
 
@@ -237,7 +307,14 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     start -= (0.05 * diff) - EPS;
     stop += (0.05 * diff);
 
+    this.zoomHandler?.reset();
+    this.zoomStateService?.updateTransform(d3.zoomIdentity);
+    if (this.waveformsvg?.nativeElement) {
+      d3.select(this.waveformsvg.nativeElement).select('g.zoom-content').attr('transform', null);
+    }
+
     if (this.start === start && this.stop === stop) {
+      this.resizePlot();
       return;
     }
 
@@ -317,6 +394,19 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
           break;
       }
     }));
+
+    try {
+      this.imageCaptureSub = this.imageSession?.captureRequest$.subscribe(
+        async ({ frameIndex, resolve }) => {
+          await this.waitUntilPlotReady(frameIndex);
+          await new Promise(r => requestAnimationFrame(() => r(null)));
+          await new Promise(r => setTimeout(r, 30));
+          const img = await this.CapturePlotImage();
+          resolve(img);
+        });
+    } catch (err) {
+      console.error('Image capture subscription failed:', err);
+    }
   }
 
   getPadding(element: SVGElement): Padding {
@@ -795,6 +885,8 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   }
 
   ngOnDestroy(): void {
+    this.zoomHandler?.destroy();
+    this.imageCaptureSub?.unsubscribe();
     this.resizeObserver?.disconnect();
     for (const token of this.pubSubTokens) {
       PubSub.unsubscribe?.(token);
@@ -893,8 +985,8 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     if (tool === 'expand') {
       return this.isFullscreen;
     }
-    if (tool === 'flag') {
-      return this.decodeEnabled;
+    if (tool === 'bits' || tool === 'flag') {
+      return this.showBits;
     }
     if (tool === 'select') {
       return this.activeTool === 'select' || this.selectEnabled;
@@ -917,13 +1009,13 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         this.gridEnabled = !this.gridEnabled;
         this.resizePlot();
         break;
+      case 'bits':
       case 'flag':
-        this.decodeEnabled = !this.decodeEnabled;
-        this.showBits = this.decodeEnabled;
-        this.measurePlot();
-        this.resizePlot();
+        this.showBits = !this.showBits;
+        this.updatePlot();
         break;
       case 'cursor':
+        this.disableEvents();
         this.activeTool = 'cursor';
         this.cursorEnabled = true;
         break;
@@ -931,20 +1023,101 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         this.activeTool = 'select';
         this.selectEnabled = true;
         this.cursorEnabled = false;
+        this.setupZoom();
         break;
       case 'zoomIn':
-      case 'zoomOut':
-      case 'pan':
-      case 'move':
-        this.activeTool = tool;
+        this.disableEvents();
+        this.activeTool = 'zoomIn';
+        this.zoomInEnabled = true;
         this.selectEnabled = false;
         this.cursorEnabled = false;
+        break;
+      case 'zoomOut':
+        this.disableEvents();
+        this.activeTool = 'zoomOut';
+        this.zoomOutEnabled = true;
+        this.selectEnabled = false;
+        this.cursorEnabled = false;
+        break;
+      case 'pan':
+        this.activeTool = 'pan';
+        this.selectEnabled = false;
+        this.cursorEnabled = false;
+        this.setupZoom();
+        break;
+      case 'move':
+        this.activeTool = 'move';
+        this.selectEnabled = false;
+        this.cursorEnabled = false;
+        this.setupZoom();
         break;
       case 'fit':
         this.onFitClick(event);
         break;
     }
     this.cdr.markForCheck();
+  }
+
+  private zoomHandler?: D3ZoomHandler;
+  private zoomInEnabled = false;
+  private zoomOutEnabled = false;
+
+  private disableEvents(): void {
+    this.zoomHandler?.destroy();
+    this.zoomHandler = undefined;
+
+    d3.select(this.waveformsvg.nativeElement).select('g.zoom-content').attr('transform', null);
+
+    this.showOverlay = false;
+    this.zoomInEnabled = false;
+    this.zoomOutEnabled = false;
+    this.cdr.detectChanges();
+  }
+
+  private setupZoom(): void {
+    if (!this.waveformsvg?.nativeElement) {
+      return;
+    }
+    this.disableEvents();
+
+    const zoomCallbacks: D3ZoomHandlerCallbacks = {
+      onTransform: (transform) => {
+        d3.select(this.waveformsvg.nativeElement)
+          .select('g.zoom-content')
+          .attr('transform', `translate(${transform.x},0) scale(${transform.k},1)`);
+
+        this.zoomStateService?.updateTransform(transform);
+      },
+      onTransformEnd: async (finalTransform) => {
+        if (!this.scalesReady) {
+          this.zoomHandler?.reset();
+          d3.select(this.waveformsvg.nativeElement).select('g.zoom-content').attr('transform', null);
+          return;
+        }
+        const newDomain = finalTransform.rescaleX(this.xScale).domain() as [number, number];
+        console.log('Interaction ended. New domain:', newDomain);
+        await this.processDomainUpdate(newDomain);
+        this.zoomStateService?.updateTransform(d3.zoomIdentity);
+      }
+    };
+
+    this.zoomHandler = new D3ZoomHandler(
+      this.waveformsvg.nativeElement,
+      zoomCallbacks,
+      { scaleExtent: [0.1, 10] }
+    );
+    this.zoomHandler.init();
+  }
+
+  private async processDomainUpdate(domain: [number, number]): Promise<void> {
+    this.start = domain[0];
+    this.stop = domain[1];
+    this.clampWindow();
+    await this.downloadRequiredData();
+    this.resizePlot();
+    this.zoomHandler?.reset();
+    d3.select(this.waveformsvg.nativeElement).select('g.zoom-content').attr('transform', null);
+    console.log('Chart updated and zoom state has been reset.');
   }
 
   onMouseEnableClick(event: Event): void {
@@ -960,16 +1133,25 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   }
 
   onPanClick(event: Event): void {
-    this.onTool('pan', event);
+    this.onMouseEnableClick(event);
+    this.activeTool = 'pan';
+    this.selectEnabled = false;
+    this.cdr.markForCheck();
   }
 
   onFitClick(event?: Event): void {
     event?.preventDefault();
     event?.stopPropagation();
-    this.start = this.fullDomain[0];
-    this.stop = this.fullDomain[1];
-    this.clampWindow();
-    void this.downloadRequiredData().then(() => this.resizePlot());
+
+    const frame = this.selectedFrame;
+    if (frame && frame.EndTime > frame.StartTime) {
+      void this.GotoTime(frame.StartTime, frame.EndTime);
+      return;
+    }
+
+    const begin = this.edgeAvailableResponse?.StartTime ?? this.fullDomain[0];
+    const end = this.edgeAvailableResponse?.EndTime ?? this.fullDomain[1];
+    void this.GotoTime(begin, end);
   }
 
   onCursorEnableClick(_model: unknown, event?: Event): void {
@@ -981,11 +1163,24 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   }
 
   onBitsClick(event: Event): void {
-    this.onTool('flag', event);
+    this.onTool('bits', event);
   }
 
   SaveImage(): void {
-    this.capturePlot();
+    if (!this.dialog) {
+      console.error('Save image dialog is not available');
+      return;
+    }
+    void import('./components/save-image/save-image.component')
+      .then(({ SaveImageComponent }) => {
+        const dialogRef = this.dialog!.open(SaveImageComponent);
+        dialogRef.afterClosed().subscribe((result: { filePath: string; fileName: string }) => {
+          if (result?.filePath && result?.fileName) {
+            void this.capturePlot(result.filePath, result.fileName);
+          }
+        });
+      })
+      .catch(err => console.error('Save image dialog failed to load:', err));
   }
 
   waveformMousemove(event: MouseEvent): void {
@@ -1017,7 +1212,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     this.lastPointerX = x;
     this.lastPointerY = event.clientY;
 
-    if (this.activeTool === 'zoomIn') {
+    if (this.zoomInEnabled) {
       this.dragging = true;
       this.showOverlay = true;
       this.overlayx0 = x;
@@ -1027,8 +1222,13 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       return;
     }
 
-    if (this.activeTool === 'zoomOut') {
-      this.zoomAround(x, 2);
+    if (this.zoomOutEnabled) {
+      const visibleRange = this.stop - this.start;
+      const position = this.xScale.invert(x);
+      this.start = position - 2 * visibleRange;
+      this.stop = position + 2 * visibleRange;
+      this.clampWindow();
+      void this.downloadRequiredData().then(() => this.resizePlot());
       event.preventDefault();
       return;
     }
@@ -1039,6 +1239,10 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       this.cursorEnabled = true;
       this.cdr.markForCheck();
       event.preventDefault();
+      return;
+    }
+
+    if ((this.activeTool === 'select' || this.activeTool === 'pan' || this.activeTool === 'move') && this.zoomHandler) {
       return;
     }
 
@@ -1053,7 +1257,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       return;
     }
 
-    if (this.activeTool === 'pan' || this.activeTool === 'move') {
+    if (this.activeTool === 'pan') {
       this.dragging = true;
       event.preventDefault();
     }
@@ -1071,7 +1275,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     this.lastPointerX = x;
     this.lastPointerY = event.clientY;
 
-    if (this.showOverlay && (this.activeTool === 'zoomIn' || this.activeTool === 'select')) {
+    if (this.showOverlay && this.zoomInEnabled) {
       if (x >= this.overlayx0) {
         this.overlayX = this.overlayx0;
         this.overlayWidth = x - this.overlayx0;
@@ -1083,7 +1287,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       return;
     }
 
-    if (this.activeTool === 'pan' || this.activeTool === 'move') {
+    if (this.activeTool === 'move') {
       this.shiftWindow(dx);
       if (this.activeTool === 'move') {
         this.waveformContainer?.nativeElement.parentElement?.scrollBy({ top: -dy });
@@ -1100,23 +1304,20 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
 
     if (this.showOverlay) {
       this.showOverlay = false;
-      if (this.overlayWidth > 4 && this.scalesReady) {
-        const t0 = this.xScale.invert(this.overlayX);
-        const t1 = this.xScale.invert(this.overlayX + this.overlayWidth);
-        if (this.activeTool === 'zoomIn') {
-          this.start = Math.min(t0, t1);
-          this.stop = Math.max(t0, t1);
-          this.clampWindow();
-          void this.downloadRequiredData().then(() => this.resizePlot());
-        } else if (this.activeTool === 'select') {
-          this.markerTimes = [Math.min(t0, t1), Math.max(t0, t1)];
-        }
+      if (this.overlayWidth > 2 && this.scalesReady && this.zoomInEnabled) {
+        this.start = this.xScale.invert(this.overlayX);
+        this.stop = this.xScale.invert(this.overlayX + this.overlayWidth);
+        this.clampWindow();
+        this.resizePlot();
       }
       this.cdr.markForCheck();
     }
   }
 
   waveformWheel(event: WheelEvent): void {
+    if (this.zoomHandler || this.zoomInEnabled || this.zoomOutEnabled) {
+      return;
+    }
     if (!(this.hasData || this.hasValidData) || !this.scalesReady) {
       return;
     }
@@ -1255,6 +1456,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     this.rebuildLanes(slot, slot);
     this.scalesReady = Number.isFinite(this.start) && Number.isFinite(this.stop) && this.stop > this.start;
     this.updateGrid();
+    d3.select(this.waveformsvg.nativeElement).select('g.zoom-content').attr('transform', null);
 
     if (this.edgeAvailableResponse)
       this.updatePlot();
@@ -1343,6 +1545,8 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       }
     });
 
+    this.bitLabels = this.showBits ? this.buildBitLabels() : [];
+
     this.busPolygons.forEach((bus, name) => {
       const busList = this.busMap.get(name) ?? [];
       const startIndex = d3.bisectLeft(busList.map(e => e.EndTime), visibleStart);
@@ -1369,6 +1573,54 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     });
   }
 
+  private buildBitLabels(): BitLabel[] {
+    if (!this.scalesReady || !this.edgeAvailableResponse) {
+      return [];
+    }
+
+    const labels: BitLabel[] = [];
+    const visibleStart = this.start;
+    const visibleStop = this.stop;
+    const domain: [number, number] = [
+      this.edgeAvailableResponse.StartTime,
+      this.edgeAvailableResponse.EndTime
+    ];
+
+    this.channelPaths.forEach((channel, id) => {
+      const plotInfo = this.plotMap.get(id);
+      if (plotInfo?.channel == null) {
+        return;
+      }
+      const waveform = this.waveforms.get(plotInfo.channel);
+      if (!waveform?.length) {
+        return;
+      }
+
+      const points = toPoints(waveform, visibleStart, visibleStop, domain);
+      for (let i = 0; i < points.length - 1; i++) {
+        const start = points[i];
+        const end = points[i + 1];
+        if (start.y !== end.y) {
+          continue;
+        }
+        const x1 = this.xScale(start.x);
+        const x2 = this.xScale(end.x);
+        if (x2 - x1 < 12) {
+          continue;
+        }
+        const high = start.y >= 0.5;
+        labels.push({
+          id: `${id}-${i}`,
+          x: (x1 + x2) / 2,
+          y: channel.yScale(start.y) + (high ? 11 : -4),
+          text: high ? '1' : '0'
+        });
+      }
+    });
+
+    return labels;
+  }
+
   getInternalSizeExcludingPadding_SVG() {
     const size = this.waveformsvg.nativeElement.getBoundingClientRect();
     const padding = this.waveformSVG_Padding ?? { left: 0, right: 0, top: 0, bottom: 0 };
@@ -1384,63 +1636,90 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     return this.selectedFrame?.Index;
   }
 
-  private capturePlot(): void {
-    const svg = this.waveformsvg?.nativeElement;
-    if (!svg) {
-      return;
-    }
-    const clone = svg.cloneNode(true) as SVGSVGElement;
-    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-    clone.setAttribute('width', String(this.plotWidth));
-    clone.setAttribute('height', String(this.plotHeight));
-    const style = document.createElementNS('http://www.w3.org/2000/svg', 'style');
-    style.textContent = `
-      .grid-line { stroke: #3F3F46; stroke-width: 0.5; stroke-dasharray: 3 4; }
-      .lane-sep { stroke-dasharray: none; }
-      .wave-path { fill: none; stroke-width: 1.5; }
-      .bus-poly { fill-opacity: 0.92; stroke: rgba(255,255,255,0.35); }
-      .bus-text { fill: #fff; font-size: 10px; text-anchor: middle; }
-      .axis-label { fill: #A1A1AA; font-size: 10px; text-anchor: middle; }
-    `;
-    clone.insertBefore(style, clone.firstChild);
-    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    bg.setAttribute('width', '100%');
-    bg.setAttribute('height', '100%');
-    bg.setAttribute('fill', '#1F1F22');
-    clone.insertBefore(bg, clone.firstChild);
+  private async rasterizePlot(element: HTMLElement): Promise<string | undefined> {
+    const html2canvas = (await import('html2canvas')).default;
+    const canvas = await html2canvas(element, {
+      backgroundColor: '#1f1f22',
+      scale: 2,
+      removeContainer: true,
+      useCORS: true
+    });
+    return canvas.toDataURL('image/png').split(',')[1];
+  }
 
-    const blob = new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const image = new Image();
-    image.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = this.plotWidth;
-      canvas.height = this.plotHeight;
-      canvas.getContext('2d')?.drawImage(image, 0, 0);
-      canvas.toBlob(png => {
-        if (!png) {
+  async capturePlot(filePath: string, fileName: string) {
+    this.hideControls = true;
+    this.cdr.detectChanges();
+    try {
+      await document.fonts.ready;
+      const element = this.plotCapture?.nativeElement ?? this.waveformContainer?.nativeElement;
+      if (!element) {
+        return;
+      }
+      const imageBase64 = await this.rasterizePlot(element);
+      if (!imageBase64) {
+        return;
+      }
+
+      this.hideControls = false;
+      this.cdr.detectChanges();
+      const fullPath = `${filePath}/${fileName}`;
+      const response = await this.coreService.FileService.FileSave({
+        Filename: fullPath,
+        Content: imageBase64,
+        IsBinary: true
+      });
+      if (response.Success) {
+        console.log('Plot Image saved at:', fullPath);
+        this.imageSession?.addImage({
+          imagePath: fullPath,
+          isIncluded: true,
+          description: ''
+        });
+        const readFileResponse = await this.coreService.FileService.ReadFile({
+          Filename: fullPath,
+          IsBinary: true
+        });
+        if (readFileResponse.Success === true) {
+          this.imageSession?.updateImageBase64(fullPath, readFileResponse.Content);
+        } else {
+          console.error(readFileResponse.Error);
           return;
         }
-        const pngUrl = URL.createObjectURL(png);
-        const link = document.createElement('a');
-        link.href = pngUrl;
-        link.download = 'plot-view.png';
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        URL.revokeObjectURL(pngUrl);
-        URL.revokeObjectURL(url);
-      }, 'image/png');
-    };
-    image.onerror = () => {
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'plot-view.svg';
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    };
-    image.src = url;
+      } else {
+        console.error('File save failed');
+      }
+    } catch (err) {
+      console.error('Failed to capture or save image:', err);
+    } finally {
+      this.hideControls = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  async CapturePlotImage(): Promise<string | undefined> {
+    try {
+      this.hideControls = true;
+      this.cdr.detectChanges();
+
+      if (!this.fontsLoaded) {
+        await document.fonts.ready;
+        this.fontsLoaded = true;
+      }
+
+      const element = this.plotCapture?.nativeElement ?? this.waveformContainer?.nativeElement;
+      if (!element) {
+        return undefined;
+      }
+
+      const canvas = await this.rasterizePlot(element);
+      return canvas;
+    } catch (err) {
+      console.error('CapturePlotImage error:', err);
+      return undefined;
+    } finally {
+      this.hideControls = false;
+      this.cdr.detectChanges();
+    }
   }
 }
