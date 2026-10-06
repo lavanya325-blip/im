@@ -13,6 +13,7 @@ import * as d3 from 'd3';
     imports: [ScrollingModule, MatTooltipModule, CommonModule],
     templateUrl: './plot-grid-component.html',
     styleUrl: './plot-grid-component.css',
+    host: { class: 'plot-grid' },
     changeDetection: ChangeDetectionStrategy.Default,
     schemas: [NO_ERRORS_SCHEMA]
 })
