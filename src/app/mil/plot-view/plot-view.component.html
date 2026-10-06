@@ -86,6 +86,14 @@
               [attr.stroke]="path.color"
             ></path>
 
+            <text
+              *ngFor="let bit of bitLabels"
+              class="bit-label"
+              text-anchor="middle"
+              [attr.x]="bit.x"
+              [attr.y]="bit.y"
+            >{{ bit.text }}</text>
+
             <g *ngFor="let bus of busPolygonList">
               <g *ngFor="let polygon of bus.polygons">
                 <polygon

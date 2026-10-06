@@ -56,6 +56,12 @@ export interface BusPolygon {
   startTime: number;
   endTime: number;
 }
+export interface BitLabel {
+  id: string;
+  x: number;
+  y: number;
+  text: string;
+}
 export type PlotTool =
   | 'snapshot'
   | 'expand'
@@ -67,6 +73,7 @@ export type PlotTool =
   | 'move'
   | 'cursor'
   | 'grid'
+  | 'bits'
   | 'flag';
 
 const EPS = 1e-12;
@@ -133,6 +140,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   yScale!: d3.ScaleLinear<number, number>;
   private scalesReady = false;
   showBits = false;
+  bitLabels: BitLabel[] = [];
 
   readonly tracks: PlotTrack[] = [
     { id: 'busA', name: 'Bus A', subtitle: 'MIL 1553', color: '#5B9BD5', kind: 'bus' },
@@ -156,7 +164,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     { id: 'move', icon: 'open_with', label: 'Drag pan', order: 6 },
     { id: 'fit', icon: 'calendar_month', label: 'Fit', order: 7 },
     { id: 'grid', icon: 'grid_3x3', label: 'Grid', order: 8 },
-    { id: 'flag', icon: 'table_chart', label: 'Table view', order: 9 }
+    { id: 'bits', icon: 'table_chart', label: 'Bits', order: 9 }
   ];
 
   hasData = false;
@@ -966,8 +974,8 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     if (tool === 'expand') {
       return this.isFullscreen;
     }
-    if (tool === 'flag') {
-      return this.decodeEnabled;
+    if (tool === 'bits' || tool === 'flag') {
+      return this.showBits;
     }
     if (tool === 'select') {
       return this.activeTool === 'select' || this.selectEnabled;
@@ -990,11 +998,10 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         this.gridEnabled = !this.gridEnabled;
         this.resizePlot();
         break;
+      case 'bits':
       case 'flag':
-        this.decodeEnabled = !this.decodeEnabled;
-        this.showBits = this.decodeEnabled;
-        this.measurePlot();
-        this.resizePlot();
+        this.showBits = !this.showBits;
+        this.updatePlot();
         break;
       case 'cursor':
         this.disableEvents();
@@ -1138,7 +1145,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   }
 
   onBitsClick(event: Event): void {
-    this.onTool('flag', event);
+    this.onTool('bits', event);
   }
 
   SaveImage(): void {
@@ -1520,6 +1527,8 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       }
     });
 
+    this.bitLabels = this.showBits ? this.buildBitLabels() : [];
+
     this.busPolygons.forEach((bus, name) => {
       const busList = this.busMap.get(name) ?? [];
       const startIndex = d3.bisectLeft(busList.map(e => e.EndTime), visibleStart);
@@ -1544,6 +1553,54 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       this.lastRenderedFrameIndex = frameIndex;
       this.plotRenderResolver?.(frameIndex);
     });
+  }
+
+  private buildBitLabels(): BitLabel[] {
+    if (!this.scalesReady || !this.edgeAvailableResponse) {
+      return [];
+    }
+
+    const labels: BitLabel[] = [];
+    const visibleStart = this.start;
+    const visibleStop = this.stop;
+    const domain: [number, number] = [
+      this.edgeAvailableResponse.StartTime,
+      this.edgeAvailableResponse.EndTime
+    ];
+
+    this.channelPaths.forEach((channel, id) => {
+      const plotInfo = this.plotMap.get(id);
+      if (plotInfo?.channel == null) {
+        return;
+      }
+      const waveform = this.waveforms.get(plotInfo.channel);
+      if (!waveform?.length) {
+        return;
+      }
+
+      const points = toPoints(waveform, visibleStart, visibleStop, domain);
+      for (let i = 0; i < points.length - 1; i++) {
+        const start = points[i];
+        const end = points[i + 1];
+        if (start.y !== end.y) {
+          continue;
+        }
+        const x1 = this.xScale(start.x);
+        const x2 = this.xScale(end.x);
+        if (x2 - x1 < 12) {
+          continue;
+        }
+        const high = start.y >= 0.5;
+        labels.push({
+          id: `${id}-${i}`,
+          x: (x1 + x2) / 2,
+          y: channel.yScale(start.y) + (high ? 11 : -4),
+          text: high ? '1' : '0'
+        });
+      }
+    });
+
+    return labels;
   }
 
   getInternalSizeExcludingPadding_SVG() {

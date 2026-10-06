@@ -433,6 +433,13 @@ plot-grid .grid-label {
   stroke-width: 1.5;
 }
 
+.bit-label {
+  fill: var(--plot-text);
+  font-size: 10px;
+  font-family: "Roboto", sans-serif;
+  pointer-events: none;
+}
+
 
 /* =========================================================
    BUS DECODE
