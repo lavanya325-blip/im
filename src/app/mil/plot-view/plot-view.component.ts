@@ -26,6 +26,7 @@ import { BusExtensions } from './extensions/bus-extensions';
 import { ImageSessionService } from './services/image-session.service';
 import { D3ZoomHandler, D3ZoomHandlerCallbacks } from './services/zoom-handler';
 import { ZoomStateService } from './services/zoom-state.service';
+import { BusChannelSelectionService, PlotChannelChoice } from '../services/bus-channel-selection.service';
 
 import * as WaveformTypes_pb from '../../../protos/WaveformTypes';
 import * as CommonTypes_pb from '../../../protos/CommonTypes';
@@ -79,6 +80,7 @@ export type PlotTool =
 const EPS = 1e-12;
 const mutex = new Mutex();
 const LANE_COLORS = ['#5B9BD5', '#E77352', '#F5C518', '#C084FC', '#F472B6', '#4ADE80'];
+const DEFAULT_PLOT_CHANNEL: PlotChannelChoice = { id: 'CH1', name: 'Channel 1', color: '#3FA9F5' };
 
 export type Padding = { left: number; right: number; top: number; bottom: number };
 
@@ -240,11 +242,18 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   private readonly dialog = inject(MatDialog, { optional: true });
   private readonly imageSession = inject(ImageSessionService, { optional: true });
   private readonly zoomStateService = inject(ZoomStateService, { optional: true });
+  private readonly busChannelSelection = inject(BusChannelSelectionService);
+  private channelSelectionSub?: Subscription;
+  private chosenChannels: PlotChannelChoice[] = [DEFAULT_PLOT_CHANNEL];
 
   constructor(
     private cdr: ChangeDetectorRef,
     private coreService: CoreService
-  ) {}
+  ) {
+    this.channelSelectionSub = this.busChannelSelection.selection$.subscribe(selection => {
+      this.applyChannelSelection(selection.channels);
+    });
+  }
 
   public waitUntilPlotReady(expectedFrame: number): Promise<boolean> {
     return new Promise(resolve => {
@@ -265,24 +274,32 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   }
 
   get visibleTracks(): PlotTrack[] {
-    return this.lanes.length ? this.lanes : this.tracks;
+    if (this.lanes.length) {
+      return this.lanes;
+    }
+    return this.chosenChannels.map(channel => ({
+      id: channel.id,
+      name: channel.name,
+      subtitle: 'Async',
+      color: channel.color,
+      kind: 'channel' as const
+    }));
   }
 
   get channelPathList(): { id: string; channel: number; path: string; color: string }[] {
-    return [...this.channelPaths.entries()].map(([id, value]) => ({
-      id,
-      channel: value.channel as unknown as number,
-      path: value.path,
-      color: this.colorFor(id)
-    }));
+    const allowed = new Set(this.visibleAsyncIds());
+    return [...this.channelPaths.entries()]
+      .filter(([id]) => allowed.has(id))
+      .map(([id, value]) => ({
+        id,
+        channel: value.channel as unknown as number,
+        path: value.path,
+        color: this.colorFor(id)
+      }));
   }
 
   get busPolygonList(): { id: string; color: string; polygons: BusPolygon[] }[] {
-    return [...this.busPolygons.entries()].map(([id, value]) => ({
-      id,
-      color: this.colorFor(id),
-      polygons: value.polygons ?? []
-    }));
+    return [];
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -440,7 +457,6 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       return;
     }
     this.addMilWaveformLanes(this.configuration);
-    this.addDecodeLanes(this.configuration);
   }
 
   private addMilWaveformLanes(config: MilRunConfig): void {
@@ -567,9 +583,6 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       });
       known.add(id);
     });
-    if (this.configuration) {
-      this.addDecodeLanes(this.configuration);
-    }
   }
 
   private seedSeriesFromPlotMap(): void {
@@ -886,6 +899,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
 
   ngOnDestroy(): void {
     this.zoomHandler?.destroy();
+    this.channelSelectionSub?.unsubscribe();
     this.imageCaptureSub?.unsubscribe();
     this.resizeObserver?.disconnect();
     for (const token of this.pubSubTokens) {
@@ -1417,9 +1431,8 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       this.waveformSVG_Padding = this.getPadding(this.waveformsvg.nativeElement);
     }
 
-    const waveformCount = [...this.plotMap.values()].filter(entry => entry.selected && entry.channel != null).length;
-    const decodeCount = this.busPolygons.size;
-    const slots = Math.max(1, waveformCount + decodeCount);
+    const waveformCount = Math.max(1, this.chosenChannels.length);
+    const slots = waveformCount;
 
     var clientRect = this.getInternalSizeExcludingPadding_SVG();
     const width = Math.max(1, clientRect.width || this.plotWidth);
@@ -1429,21 +1442,17 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
 
     const slot = height / slots;
 
-    const orderedChannels = [...this.channelPaths.entries()]
-      .sort((a, b) => a[1].index - b[1].index);
-
-    orderedChannels.forEach(([, v], i) => {
-      v.yScale = d3.scaleLinear()
+    const asyncIds = this.orderedAsyncIds();
+    this.chosenChannels.forEach((channel, index) => {
+      const dataId = asyncIds[this.channelNumber(channel.id) - 1];
+      const series = dataId ? this.channelPaths.get(dataId) : undefined;
+      if (!series) {
+        return;
+      }
+      series.yScale = d3.scaleLinear()
         .domain([-0.1, 1.1])
-        .range([(i + 1) * slot, i * slot]);
+        .range([(index + 1) * slot, index * slot]);
     });
-
-    [...this.busPolygons.entries()]
-      .sort((a, b) => a[1].index - b[1].index)
-      .forEach(([, v], i) => {
-        const lane = waveformCount + i;
-        v.yScale = d3.scaleLinear().domain([-0.1, 1.1]).range([(lane + 1) * slot, lane * slot]);
-      });
 
     this.xScale = d3.scaleLinear()
       .domain([this.start, this.stop])
@@ -1465,35 +1474,68 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     console.log('resizePlot: exited');
   }
 
-  private rebuildLanes(channelHeight: number, busHeight: number): void {
-    if (this.channelPaths.size === 0 && this.busPolygons.size === 0) {
-      return;
-    }
-    const rows: PlotTrack[] = [];
-    const channels = [...this.channelPaths.entries()].sort((a, b) => a[1].index - b[1].index);
-    channels.forEach(([id], index) => {
-      const info = this.plotMap.get(id);
-      rows.push({
-        id,
-        name: info?.name ?? id,
-        subtitle: info?.subtitle ?? 'Async',
-        color: LANE_COLORS[index % LANE_COLORS.length],
-        kind: 'channel'
-      });
+  private rebuildLanes(channelHeight: number, _busHeight: number): void {
+    const asyncIds = this.orderedAsyncIds();
+    const rows: PlotTrack[] = this.chosenChannels.map(channel => {
+      const dataId = asyncIds[this.channelNumber(channel.id) - 1];
+      const id = dataId ?? channel.id;
       this.laneHeights.set(id, channelHeight);
-    });
-    [...this.busPolygons.keys()].forEach((id, index) => {
-      const info = this.plotMap.get(id);
-      rows.push({
+      return {
         id,
-        name: info?.name ?? id,
-        subtitle: info?.subtitle ?? 'MIL 1553',
-        color: LANE_COLORS[(channels.length + index) % LANE_COLORS.length],
-        kind: 'bus'
-      });
-      this.laneHeights.set(id, Math.max(busHeight, 1));
+        name: channel.name?.trim() || channel.id,
+        subtitle: 'Async',
+        color: channel.color || DEFAULT_PLOT_CHANNEL.color,
+        kind: 'channel' as const
+      };
     });
     this.lanes = rows;
+  }
+
+  private applyChannelSelection(channels: PlotChannelChoice[] | undefined): void {
+    const chosen = (channels ?? []).filter(channel => channel.checked !== false && !!channel.id);
+    this.chosenChannels = chosen.length
+      ? chosen.map(channel => ({
+          id: channel.id,
+          name: channel.name?.trim() || channel.id,
+          color: channel.color || DEFAULT_PLOT_CHANNEL.color
+        }))
+      : [DEFAULT_PLOT_CHANNEL];
+    if (this.scalesReady) {
+      this.resizePlot();
+    } else {
+      this.lanes = [];
+      this.cdr.markForCheck();
+    }
+  }
+
+  private channelNumber(id: string): number {
+    const match = /(\d+)/.exec(id);
+    return match ? Number(match[1]) : 0;
+  }
+
+  private orderedAsyncIds(): string[] {
+    return [...this.channelPaths.entries()]
+      .filter(([id]) => this.isAsyncPlotChannel(id))
+      .sort((a, b) => a[1].index - b[1].index)
+      .map(([id]) => id);
+  }
+
+  private visibleAsyncIds(): string[] {
+    const ordered = this.orderedAsyncIds();
+    return this.chosenChannels
+      .map(channel => ordered[this.channelNumber(channel.id) - 1])
+      .filter((id): id is string => !!id);
+  }
+
+  private isAsyncPlotChannel(id: string): boolean {
+    const entry = this.plotMap.get(id);
+    if (!entry?.channel) {
+      return false;
+    }
+    if (entry.subtitle === 'MIL 1553') {
+      return false;
+    }
+    return !/^mil([_\s-]*\d+)?$/i.test((entry.name ?? '').trim());
   }
 
   private updateGrid(): void {
