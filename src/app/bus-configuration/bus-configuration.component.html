@@ -1,0 +1,108 @@
+<div class="bus-config-wrapper">
+  <div class="bus-config-panel">
+
+    <div class="panel-title">
+      MIL 1553 Configuration
+    </div>
+
+    <section class="config-section">
+      <div class="section-label">Source</div>
+
+      <div class="source-options">
+        <label class="radio-option">
+          <input
+            type="radio"
+            name="busSource"
+            [checked]="selectedSource === 'Bus A'"
+            (change)="selectSource('Bus A')"
+          />
+          <span class="radio-circle"></span>
+          <span class="radio-text">Bus A</span>
+        </label>
+
+        <label class="radio-option">
+          <input
+            type="radio"
+            name="busSource"
+            [checked]="selectedSource === 'Bus B'"
+            (change)="selectSource('Bus B')"
+          />
+          <span class="radio-circle"></span>
+          <span class="radio-text">Bus B</span>
+        </label>
+      </div>
+    </section>
+
+    <section class="config-section sample-rate-section">
+      <div class="section-label">Sample Rate</div>
+
+      <div class="sample-rate-control">
+        <select
+          class="sample-rate-select"
+          [value]="sampleRate"
+          (change)="onSampleRateChange($any($event.target).value)"
+          aria-label="Select sample rate"
+        >
+          <option [value]="125">125 Msps</option>
+          <option [value]="250">250 Msps</option>
+          <option [value]="500">500 Msps</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="config-section channel-section">
+      <div class="section-label">
+        Channels
+        <span class="channel-count">
+          ({{ visibleChannels.length }} available)
+        </span>
+      </div>
+
+      <div class="channel-grid">
+        <div
+          class="channel-option"
+          *ngFor="let channel of visibleChannels"
+          [attr.data-channel]="channel.id"
+        >
+          <span
+            class="channel-color-box"
+            [ngClass]="channel.id.toLowerCase()"
+            [style.background-color]="channel.color"
+          ></span>
+
+          <input
+            type="text"
+            class="channel-name-input"
+            [value]="channel.name"
+            (input)="updateChannelName(channel, $any($event.target).value)"
+            [attr.aria-label]="'Edit name for ' + channel.id"
+            [title]="'Edit ' + channel.id + ' name'"
+            maxlength="24"
+          />
+
+          <label class="channel-checkbox">
+            <input
+              type="checkbox"
+              [checked]="channel.checked"
+              (change)="toggleChannel(channel, $any($event.target).checked)"
+              [attr.aria-label]="'Select ' + channel.name"
+            />
+
+            <span class="checkbox-box">
+              <span class="check-mark" *ngIf="channel.checked">✓</span>
+            </span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <section class="config-section trigger-container">
+      <app-trigger-configuration></app-trigger-configuration>
+    </section>
+
+    <section class="config-section acquisition-container">
+      <app-acquisition-configuration></app-acquisition-configuration>
+    </section>
+
+  </div>
+</div>

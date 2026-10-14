@@ -1,0 +1,48 @@
+Apply these edits to your existing plot-view.component.ts:
+
+1) Imports
+   import { ChannelPlotBridgeService } from './services/channel-plot-bridge.service';
+   import { applyBusChannelSelection } from './plot-channel-selection';
+   import { wirePlotChannelSelection } from './wire-plot-channel-selection';
+   import { DestroyRef } from '@angular/core';
+
+2) Class fields
+   private readonly channelColors = new Map<string, string>();
+   private readonly destroyRef = inject(DestroyRef);
+
+3) Constructor / ngAfterViewInit (after other subscriptions)
+   wirePlotChannelSelection(() => ({
+     plotMap: this.plotMap,
+     busMap: this.busMap,
+     busPolygons: this.busPolygons,
+     channelPaths: this.channelPaths,
+     channelColors: this.channelColors,
+     lanes: this.lanes,
+     seedSeriesFromPlotMap: () => this.seedSeriesFromPlotMap(),
+     resizePlot: () => this.resizePlot(),
+     edgeAvailableResponse: this.edgeAvailableResponse
+   }), this.destroyRef);
+
+4) colorFor(id: string)
+   return this.channelColors.get(id)
+     ?? this.visibleTracks.find(track => track.id === id)?.color
+     ?? LANE_COLORS[0];
+
+5) Remove MIL decode lane seeding (TL: MIL__1 not needed)
+   In applyMilConfiguration(), remove the call to addDecodeLanes(this.configuration)
+   OR in addDecodeLanes() return immediately without adding BUS* / protocol rows.
+
+6) Optional @Input for parent binding
+   @Input() set busChannelSelection(selection: ChannelSelection | null) {
+     if (selection) {
+       applyBusChannelSelection({ ... same context as wirePlotChannelSelection }, selection);
+       this.cdr.markForCheck();
+     }
+   }
+
+Parent template (bus config + plot on same screen):
+
+  <app-bus-configuration (channelSelectionChanged)="onChannels($event)"></app-bus-configuration>
+  <app-plot-view [busChannelSelection]="lastChannelSelection"></app-plot-view>
+
+When no checkboxes are checked, plot shows CH1 by default (see defaultChannelWhenEmpty).
