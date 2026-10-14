@@ -1,171 +1,524 @@
+/* =========================================================
+   HOST
+========================================================= */
+
 :host {
-  display: block;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
   height: 100%;
-  color: #e4e4e7;
-  background: #1f1f22;
+  min-height: 0;
+  flex: 1 1 auto;
+  align-self: stretch;
+  font-family: "Roboto", sans-serif;
+  /* =======================================================
+     DARK THEME DEFAULT
+  ======================================================= */
+
+  --plot-bg: #27272A;
+  --plot-body-bg: #1F1F22;
+  --plot-lane-bg: #242426;
+  --plot-border: #09090B;
+  --plot-text: #F4F4F5;
+  --plot-secondary-text: #A1A1AA;
+  --plot-icon: #A1A1AA;
+  --plot-icon-active: #FFFFFF;
+  --plot-grid: #3F3F46;
+  color: var(--plot-text);
 }
+
+.path-CH4 {
+  stroke: var(--channel-color-3);
+  color: var(--channel-color-3);
+}
+
+
+/* =========================================================
+   LIGHT THEME
+========================================================= */
+
+:host-context(.light-mode),
+:host-context(.light-theme) {
+  --plot-bg: #FFFFFF;
+  --plot-body-bg: #F5F5F5;
+  --plot-lane-bg: #FFFFFF;
+  --plot-border: #D4D4D4;
+  --plot-text: #202124;
+  --plot-secondary-text: #5F6368;
+  --plot-icon: #5F6368;
+  --plot-icon-active: #202124;
+  --plot-grid: #D0D0D0;
+  color: var(--plot-text);
+}
+
+
+/* =========================================================
+   DARK THEME
+========================================================= */
+
+:host-context(.dark-mode),
+:host-context(.dark-theme) {
+  --plot-bg: #27272A;
+  --plot-body-bg: #1F1F22;
+  --plot-lane-bg: #242426;
+  --plot-border: #09090B;
+  --plot-text: #F4F4F5;
+  --plot-secondary-text: #A1A1AA;
+  --plot-icon: #A1A1AA;
+  --plot-icon-active: #FFFFFF;
+  --plot-grid: #3F3F46;
+  color: var(--plot-text);
+}
+
+
+/* =========================================================
+   GLOBAL BOX SIZING
+========================================================= */
+
+:host *,
+:host *::before,
+:host *::after {
+  box-sizing: border-box;
+}
+
+
+/* =========================================================
+   FULLSCREEN
+========================================================= */
 
 :host.is-fullscreen {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: 200;
+  width: 100vw;
+  height: 100vh;
+  background: var(--plot-bg);
+  color: var(--plot-text);
 }
+
+
+  :host.is-fullscreen .plot-view {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+  }
+
+
+/* =========================================================
+   PLOT VIEW
+========================================================= */
 
 .plot-view {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  padding: 8px;
+  gap: 8px;
+  width: 100%;
   height: 100%;
-  min-height: 420px;
+  max-height: none;
+  background: var(--plot-bg);
+  border: 0.5px solid var(--plot-border);
+  flex: 1 1 auto;
+  order: 0;
+  align-self: stretch;
+  min-height: 0;
+  color: var(--plot-text);
+  font-family: "Roboto", sans-serif;
 }
 
-.plot-header,
-.manipulation-tools {
+
+/* =========================================================
+   PLOT HEADER
+========================================================= */
+
+.plot-header {
   display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  justify-content: space-between;
+  width: 100%;
+  height: 24px;
+  flex: none;
+  order: 0;
+  color: var(--plot-text);
 }
+
+
+/* =========================================================
+   PLOT TITLE
+========================================================= */
 
 .plot-title {
+  font-family: "Roboto", sans-serif;
+  font-style: normal;
+  font-size: 14px;
   font-weight: 600;
+  line-height: 20px;
+  color: var(--plot-text);
 }
 
-.plot-header-actions,
-.manipulation-tools {
-  margin-left: auto;
+
+/* =========================================================
+   HEADER ACTIONS
+========================================================= */
+
+.plot-header-actions {
+  display: flex;
+  gap: 8px;
 }
 
-.manipulation-tools {
-  margin-left: 0;
-}
 
-.icon-btn,
-.tool-btn {
-  display: inline-flex;
+/* =========================================================
+   ICON BUTTON
+========================================================= */
+
+.icon-btn {
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+  border: none;
+  background: transparent;
+  color: var(--plot-icon);
+  cursor: pointer;
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  color: inherit;
+  flex: none;
+  flex-grow: 0;
+}
+
+
+  .icon-btn svg {
+    width: 16px;
+    height: 16px;
+    display: block;
+  }
+
+
+  .icon-btn.is-active,
+  .icon-btn:hover {
+    color: var(--plot-icon-active);
+  }
+
+
+/* =========================================================
+   MANIPULATION TOOLS
+========================================================= */
+
+.manipulation-tools {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 0 8px;
+  gap: 22px;
+  width: 414px;
+  max-width: 100%;
+  height: 20px;
+  border-radius: 4px;
+  flex: none;
+  order: 1;
+  flex-grow: 0;
+}
+
+
+/* =========================================================
+   TOOL BUTTON
+========================================================= */
+
+.tool-btn {
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
   background: transparent;
-  border: 0;
-  border-radius: 6px;
+  color: var(--plot-icon);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  flex-grow: 0;
 }
 
-.icon-btn svg,
-.tool-btn svg {
-  width: 18px;
-  height: 18px;
-}
 
-.tool-btn.is-active,
-.icon-btn.is-active {
-  background: #3f3f46;
-}
+  .tool-btn svg {
+    width: 20px;
+    height: 20px;
+    display: block;
+  }
+
+
+  .tool-btn mat-icon {
+    width: 20px;
+    height: 20px;
+    font-size: 20px;
+    line-height: 20px;
+  }
+
+
+  .tool-btn.is-active,
+  .tool-btn:hover {
+    color: var(--plot-icon-active);
+  }
+
+
+/* =========================================================
+   PLOT BODY
+========================================================= */
 
 .plot-body {
   display: flex;
-  flex: 1;
+  flex-direction: row;
+  width: 100%;
   min-height: 0;
+  flex: 1 1 auto;
+  align-self: stretch;
+  background: var(--plot-body-bg);
+  border: 0.5px solid var(--plot-border);
+  overflow: hidden;
+  order: 2;
 }
 
-.lane-rail {
-  width: 148px;
-  flex: none;
-  border-right: 1px solid #3f3f46;
+
+/* =========================================================
+   WAVEFORM CONTAINER
+========================================================= */
+
+.waveform-container {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
 }
+
+
+.waveform-svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+
+/* I3C grid overlay: dashed lines sit on the waveform and ignore the mouse. */
+.plot-grid,
+plot-grid {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 100%;
+  z-index: 1;
+  pointer-events: none;
+  --grid-line: var(--plot-grid);
+  --grid-label-color: var(--plot-secondary-text);
+}
+
+.plot-grid .grid-label,
+plot-grid .grid-label {
+  fill: var(--grid-label-color);
+}
+
+
+/* =========================================================
+   LANE RAIL
+========================================================= */
+
+.lane-rail {
+  width: 118px;
+  flex: none;
+  align-self: stretch;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--plot-lane-bg);
+  border-right: 0.5px solid var(--plot-border);
+}
+
+
+/* =========================================================
+   LANE LABEL
+========================================================= */
 
 .lane-label {
   display: flex;
-  gap: 8px;
+  flex-direction: row;
   align-items: center;
-  padding: 0 8px;
+  gap: 8px;
+  padding-right: 8px;
   box-sizing: border-box;
 }
 
-.lane-bar,
-.swatch {
+
+/* =========================================================
+   LANE BAR
+========================================================= */
+
+.lane-bar {
   width: 4px;
   align-self: stretch;
-  border-radius: 2px;
+  flex: none;
 }
+
+
+/* =========================================================
+   LANE NAME
+========================================================= */
+
+.lane-name {
+  font-family: "Roboto", sans-serif;
+  font-style: normal;
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 20px;
+  letter-spacing: 0.1px;
+  color: var(--plot-text) !important;
+}
+
+
+/* =========================================================
+   LANE SUBTITLE
+========================================================= */
+
+.lane-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--plot-secondary-text) !important;
+}
+
+
+/* =========================================================
+   SWATCH
+========================================================= */
 
 .swatch {
   width: 8px;
   height: 8px;
-  align-self: center;
+  border-radius: 1px;
 }
 
-.lane-name {
-  font-size: 13px;
-}
 
-.lane-sub {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  color: #a1a1aa;
-  font-size: 11px;
-}
-
-.waveform-container {
-  position: relative;
-  flex: 1;
-  min-width: 0;
-  min-height: 360px;
-}
-
-.waveform-svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-  min-height: 360px;
-  background: #1f1f22;
-}
+/* =========================================================
+   GRID
+========================================================= */
 
 .grid-line {
-  stroke: #3f3f46;
+  stroke: var(--plot-grid);
   stroke-width: 0.5;
   stroke-dasharray: 3 4;
 }
 
-.lane-sep {
-  stroke-dasharray: none;
-}
+
+  .grid-line.lane-sep {
+    stroke-dasharray: none;
+  }
+
+
+/* =========================================================
+   WAVE PATH
+========================================================= */
 
 .wave-path {
   fill: none;
   stroke-width: 1.5;
 }
 
-.bus-poly {
-  fill-opacity: 0.92;
-  stroke: rgba(255, 255, 255, 0.35);
-}
-
-.bus-text,
-.axis-label,
-.no-data_label {
-  fill: #fff;
+.bit-label {
+  fill: var(--plot-text);
   font-size: 10px;
+  font-family: "Roboto", sans-serif;
+  pointer-events: none;
 }
 
-.axis-label,
-.no-data_label {
-  fill: #a1a1aa;
+
+/* =========================================================
+   BUS DECODE
+========================================================= */
+
+.bus-decode {
+  height: 19px;
+  flex: none;
+  order: 1;
+  align-self: stretch;
+  flex-grow: 0;
+  z-index: 1;
 }
+
+
+.decode-rail {
+  stroke: #7DD3FC;
+  stroke-width: 1;
+}
+
+
+.decode-idle {
+  stroke: #E879F9;
+  stroke-width: 1;
+}
+
+
+.bus-poly {
+  fill-opacity: 0.9;
+  stroke: #E8A04A;
+  stroke-width: 1.1;
+}
+
+
+.bus-text {
+  fill: #FFFFFF;
+  font-size: 9px;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
+}
+
+
+/* =========================================================
+   ZOOM OVERLAY
+========================================================= */
 
 .zoom-overlay {
-  fill: rgba(91, 155, 213, 0.25);
-  stroke: #5b9bd5;
+  fill: rgba(20, 128, 195, 0.22);
+  stroke: var(--btn-bg, #1480c3);
+  stroke-width: 1;
+  pointer-events: none;
 }
 
-.cursor-line {
-  stroke: #f5c518;
-  stroke-width: 1;
+
+/* =========================================================
+   CURSOR / MARKER
+========================================================= */
+
+.cursor-line,
+.marker-line {
+  stroke: #F5C518;
+  stroke-width: 1.2;
+  pointer-events: none;
 }
+
 
 .marker-line {
-  stroke: #f472b6;
-  stroke-width: 1;
+  stroke: #00E4B1;
+  stroke-dasharray: 4 3;
+}
+
+
+/* =========================================================
+   AXIS LABEL
+========================================================= */
+
+.axis-label {
+  fill: var(--plot-secondary-text);
+  font-size: 10px;
+  text-anchor: middle;
 }

@@ -1,5 +1,5 @@
 import * as d3 from 'd3';
-import { Point } from '../models/plot-track.model';
+import { Point } from '../../models/plot.model';
 
 const bisector = d3.bisector((d: Point) => d.x);
 

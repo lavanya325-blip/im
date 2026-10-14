@@ -1,0 +1,61 @@
+.groupbox {
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 0rem 0.5rem 0.6rem 0.8rem;
+    /* margin: 1rem 0; */
+}
+
+.groupbox-legend {
+    display: block;
+    font-weight: normal;
+    font-size: 1vw;
+    width: auto;
+    color: var(--color-secondary);
+    padding: 0 0.5rem;
+}
+
+.groupbox-content {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+}
+
+.input-box {
+    height: 3.293vh;
+    margin-left: 0.5208vw;
+    margin-right: 0.5208vw;
+    align-self: center;
+    padding: 0 0.721vw;
+    background: var(--color-save) !important;
+    color: var(--color-text) !important;
+    border: none!important;
+    font-size: 0.9vw!important;
+}
+
+.mod-modal__inner {
+    min-width: 32rem;
+}
+
+.mod-block-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+}
+
+.mod-modal__close {
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+}
+
+.input-box-label {
+    align-self: center;
+    white-space: nowrap;
+}
+
+.button-container {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
