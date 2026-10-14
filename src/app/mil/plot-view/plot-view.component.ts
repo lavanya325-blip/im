@@ -26,7 +26,6 @@ import { BusExtensions } from './extensions/bus-extensions';
 import { ImageSessionService } from './services/image-session.service';
 import { D3ZoomHandler, D3ZoomHandlerCallbacks } from './services/zoom-handler';
 import { ZoomStateService } from './services/zoom-state.service';
-import { BusChannelSelectionService, PlotChannelChoice } from '../services/bus-channel-selection.service';
 
 import * as WaveformTypes_pb from '../../../protos/WaveformTypes';
 import * as CommonTypes_pb from '../../../protos/CommonTypes';
@@ -80,6 +79,14 @@ export type PlotTool =
 const EPS = 1e-12;
 const mutex = new Mutex();
 const LANE_COLORS = ['#5B9BD5', '#E77352', '#F5C518', '#C084FC', '#F472B6', '#4ADE80'];
+
+interface PlotChannelChoice {
+  id: string;
+  name: string;
+  color: string;
+  checked?: boolean;
+}
+
 const DEFAULT_PLOT_CHANNEL: PlotChannelChoice = { id: 'CH1', name: 'Channel 1', color: '#3FA9F5' };
 
 export type Padding = { left: number; right: number; top: number; bottom: number };
@@ -242,18 +249,16 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   private readonly dialog = inject(MatDialog, { optional: true });
   private readonly imageSession = inject(ImageSessionService, { optional: true });
   private readonly zoomStateService = inject(ZoomStateService, { optional: true });
-  private readonly busChannelSelection = inject(BusChannelSelectionService);
-  private channelSelectionSub?: Subscription;
   private chosenChannels: PlotChannelChoice[] = [DEFAULT_PLOT_CHANNEL];
+
+  @Input() set channelSelection(value: { channels?: PlotChannelChoice[] } | null) {
+    this.applyChannelSelection(value?.channels);
+  }
 
   constructor(
     private cdr: ChangeDetectorRef,
     private coreService: CoreService
-  ) {
-    this.channelSelectionSub = this.busChannelSelection.selection$.subscribe(selection => {
-      this.applyChannelSelection(selection.channels);
-    });
-  }
+  ) {}
 
   public waitUntilPlotReady(expectedFrame: number): Promise<boolean> {
     return new Promise(resolve => {
@@ -899,7 +904,6 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
 
   ngOnDestroy(): void {
     this.zoomHandler?.destroy();
-    this.channelSelectionSub?.unsubscribe();
     this.imageCaptureSub?.unsubscribe();
     this.resizeObserver?.disconnect();
     for (const token of this.pubSubTokens) {
