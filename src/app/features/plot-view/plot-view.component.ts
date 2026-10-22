@@ -321,15 +321,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
 
         case CommonTypes_pb.SystemStates.CleanupRun:
         case CommonTypes_pb.SystemStates.Ready:
-          await this.cleanWaveformData();
-          this.edgeAvailableResponse = undefined;
-          this.hasValidData = false;
-          this.hasData = false;
-          this.lanes = [];
-          this.annotations = [];
-          this.triggerEnabled = false;
-          this.triggerFound = false;
-          this.triggerTime = 0;
+          await this.resetPlotSessionState();
           this.resizePlot();
           break;
       }
@@ -480,6 +472,44 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     });
   }
 
+  /**
+   * Full reset between offline/live runs. Partial cleanup (empty arrays only) leaves
+   * stale maps and flags so the second trace load skips seeding and never redraws.
+   */
+  private async resetPlotSessionState(): Promise<void> {
+    await this.cleanWaveformData();
+    this.plotMap.clear();
+    this.channelPaths.clear();
+    this.busPolygons.clear();
+    this.busMap.clear();
+    this.waveforms.clear();
+    this.laneHeights.clear();
+    this.lanes = [];
+    this.annotations = [];
+    this.edgeAvailableResponse = undefined;
+    this.configuration = undefined;
+    this.configuration_I3C = undefined;
+    this.hasValidData = false;
+    this.hasData = false;
+    this.triggerEnabled = false;
+    this.triggerFound = false;
+    this.triggerTime = 0;
+    this.minEdgeWidthIsFinal = false;
+    this.minEdgeWidth = 50e-9;
+    this.scalesReady = false;
+    this.start = 0;
+    this.stop = 1;
+    this.fullDomain = [0, 1];
+    this.downloadedDataStart = undefined;
+    this.downloadedDataStop = undefined;
+    this.plotRenderResolver = undefined;
+    this.lastRenderedFrameIndex = undefined;
+    this.showOverlay = false;
+    this.zoomInEnabled = false;
+    this.zoomOutEnabled = false;
+    this.dragging = false;
+  }
+
   private async cleanWaveformData(): Promise<void> {
     const release = await mutex.acquire();
     try {
@@ -499,9 +529,12 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   private async updatePlotLimits() {
     console.log('edges came');
     if (this.edgeAvailableResponse && this.edgeAvailableResponse.ChannelEdgeAvailable.length > 0) {
-      if (this.waveforms.size == 0) {
+      const seriesNeedsSeed =
+        this.channelPaths.size === 0 && this.busPolygons.size === 0;
+      if (seriesNeedsSeed) {
         if (this.plotMap.size == 0) {
           this.ensurePlotMapFromEdges();
+          this.ensurePlotMapFromConfiguration();
         } else {
           this.includeEdgeChannels();
         }
