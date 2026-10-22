@@ -234,6 +234,10 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
 
   private edgeAvailableResponse: WaveformTypes_pb.EdgesAvailableResponse | undefined;
   private traceBoundsKey?: string;
+  /** MIL offline import publishes many edge notifications; merge to full trace span per run. */
+  private mergedTraceStart?: number;
+  private mergedTraceEnd?: number;
+  private mergedBoundsRunId = -1;
   private runId = 0;
   public plotMap: Map<string, PlotEntry> = new Map();
   channelPaths: Map<string, { index: number; channel: CommonTypes_pb.Channels; yScale: d3.ScaleLinear<number, number>; path: string }> = new Map();
@@ -366,7 +370,8 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         return;
       }
       msg.StartTime -= EPS;
-      if (!this.normalizeTraceBounds(msg)) {
+      const bounds = this.ingestMergedTraceBounds(msg);
+      if (!bounds) {
         return;
       }
       this.edgeAvailableResponse = msg;
@@ -401,8 +406,14 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
           this.downloadedDataStop = undefined;
           this.minEdgeWidthIsFinal = false;
           this.traceBoundsKey = undefined;
+          this.mergedTraceStart = undefined;
+          this.mergedTraceEnd = undefined;
+          this.mergedBoundsRunId = -1;
           this.start = 0;
           this.stop = 1;
+          this.plotMap.clear();
+          this.channelPaths.clear();
+          this.waveforms.clear();
           this.configuration = await this.coreService.AppConfigService.getConfig() as MilRunConfig;
 
           console.log('PlotViewComponent:', this.configuration);
@@ -418,6 +429,10 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
           this.resizePlot();
           break;
         }
+
+        case CommonTypes_pb.SystemStates.RunCompleted:
+          await this.refreshPlotAfterRunComplete();
+          break;
 
         case CommonTypes_pb.SystemStates.CleanupRun:
         case CommonTypes_pb.SystemStates.Ready:
@@ -470,6 +485,9 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     }
 
     this.traceBoundsKey = undefined;
+    this.mergedTraceStart = undefined;
+    this.mergedTraceEnd = undefined;
+    this.mergedBoundsRunId = -1;
     this.edgeAvailableResponse = undefined;
     this.hasValidData = false;
     this.hasData = false;
@@ -518,10 +536,125 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     return { start, end, key: `${start}:${end}` };
   }
 
+  private ingestMergedTraceBounds(
+    response: WaveformTypes_pb.EdgesAvailableResponse
+  ): { start: number; end: number; key: string } | null {
+    let start = response.StartTime;
+    let end = response.EndTime;
+    if (!Number.isFinite(start) || !Number.isFinite(end)) {
+      return null;
+    }
+
+    if (this.mergedBoundsRunId !== this.runId) {
+      this.mergedBoundsRunId = this.runId;
+      this.mergedTraceStart = start;
+      this.mergedTraceEnd = end;
+    } else {
+      this.mergedTraceStart = Math.min(this.mergedTraceStart!, start);
+      this.mergedTraceEnd = Math.max(this.mergedTraceEnd!, end);
+    }
+
+    start = this.mergedTraceStart!;
+    end = this.mergedTraceEnd!;
+    if (end < start) {
+      [start, end] = [end, start];
+      this.mergedTraceStart = start;
+      this.mergedTraceEnd = end;
+    }
+    if (end <= start + EPS) {
+      return null;
+    }
+    return { start, end, key: `${start}:${end}` };
+  }
+
   private getTraceBounds(): { start: number; end: number; key: string } | null {
+    if (
+      this.mergedBoundsRunId === this.runId &&
+      this.mergedTraceStart != null &&
+      this.mergedTraceEnd != null &&
+      this.mergedTraceEnd > this.mergedTraceStart + EPS
+    ) {
+      return {
+        start: this.mergedTraceStart,
+        end: this.mergedTraceEnd,
+        key: `${this.mergedTraceStart}:${this.mergedTraceEnd}`
+      };
+    }
     return this.edgeAvailableResponse
       ? this.normalizeTraceBounds(this.edgeAvailableResponse)
       : null;
+  }
+
+  private async refreshPlotAfterRunComplete(): Promise<void> {
+    const run = this.runId;
+    const traceBounds = this.getTraceBounds();
+    if (!traceBounds || !this.edgeAvailableResponse) {
+      return;
+    }
+
+    this.ensurePlotMapFromEdges();
+    if (this.plotMap.size === 0) {
+      return;
+    }
+    this.seedSeriesFromPlotMap();
+
+    this.fullDomain = [traceBounds.start, traceBounds.end];
+    this.downloadedDataStart = undefined;
+    this.downloadedDataStop = undefined;
+    await this.cleanWaveformData();
+
+    const channelWithMoreEdges = this.edgeAvailableResponse.ChannelEdgeAvailable.reduce((max, current) =>
+      current.Count > max.Count ? current : max
+    );
+    let edgeCount = Math.min(channelWithMoreEdges.Count, 1000);
+
+    try {
+      const response = await this.coreService.ResultService.getEdges({
+        Channel: channelWithMoreEdges.Channel,
+        IndexBased: { Offset: 0, Count: edgeCount }
+      });
+      if (run !== this.runId) {
+        return;
+      }
+      const edgeList = response?.Edges?.Edges ?? [];
+      if (edgeList.length > 0) {
+        const [minEdgeWidth] = d3.extent(
+          edgeList
+            .map((d: number, i: number, arr: number[]) => (i > 0 ? d - arr[i - 1] : null))
+            .slice(1)
+            .filter((v): v is number => v != null && v > 0)
+        );
+        if (typeof minEdgeWidth === 'number' && minEdgeWidth > 0) {
+          this.minEdgeWidth = minEdgeWidth;
+        }
+        this.start = edgeList[0];
+        this.stop = Math.min(traceBounds.end, this.start + this.minEdgeWidth * 1000);
+      } else {
+        this.start = traceBounds.start;
+        this.stop = Math.min(traceBounds.end, traceBounds.start + this.minEdgeWidth * 1000);
+      }
+      if (this.stop <= this.start) {
+        this.stop = traceBounds.start + Math.max(this.minEdgeWidth * 1000, EPS);
+      }
+
+      await this.downloadRequiredData();
+      if (run !== this.runId) {
+        return;
+      }
+
+      const hasPoints =
+        [...this.waveforms.values()].some(points => points.length > 0) ||
+        [...this.busMap.values()].some(packets => packets.length > 0);
+
+      if (hasPoints) {
+        this.hasValidData = true;
+        this.hasData = true;
+        this.resizePlot();
+        this.cdr.detectChanges();
+      }
+    } catch (error) {
+      console.error('refreshPlotAfterRunComplete failed', error);
+    }
   }
 
   private normalizeTimeRange(startTime: number, stopTime: number): [number, number] {
@@ -726,13 +859,13 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       return;
     }
 
-    const traceChanged = this.traceBoundsKey !== traceBounds.key;
-    if (traceChanged) {
+    const boundsExpanded = this.traceBoundsKey !== traceBounds.key;
+    if (boundsExpanded) {
       this.traceBoundsKey = traceBounds.key;
-      this.downloadedDataStart = undefined;
-      this.downloadedDataStop = undefined;
-      this.minEdgeWidthIsFinal = false;
-      await this.cleanWaveformData();
+      if (!this.hasValidData || this.downloadedDataStart === undefined) {
+        this.downloadedDataStart = undefined;
+        this.downloadedDataStop = undefined;
+      }
     }
 
     if (!(this.edgeAvailableResponse && this.edgeAvailableResponse.ChannelEdgeAvailable.length > 0)) {
@@ -750,7 +883,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
     this.fullDomain = [dataStart, dataEnd];
 
     const needsTimeWindow =
-      traceChanged ||
+      boundsExpanded ||
       this.downloadedDataStart === undefined ||
       this.downloadedDataStop === undefined ||
       this.stop <= this.start ||
@@ -768,6 +901,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         this.minEdgeWidthIsFinal = true;
       }
 
+      let edgeList: number[] = [];
       try {
         const response = await this.coreService.ResultService.getEdges({
           Channel: channelWithMoreEdges.Channel,
@@ -776,7 +910,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         if (run !== this.runId) {
           return;
         }
-        const edgeList = response?.Edges?.Edges ?? [];
+        edgeList = response?.Edges?.Edges ?? [];
         const difference = edgeList
           .map((d: number, i: number, arr: number[]) => (i > 0 ? d - arr[i - 1] : null))
           .slice(1);
@@ -789,8 +923,13 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       }
 
       if (needsTimeWindow) {
-        this.start = dataStart;
-        this.stop = Math.min(dataEnd, dataStart + this.minEdgeWidth * 1000);
+        if (edgeList.length > 0) {
+          this.start = edgeList[0];
+          this.stop = Math.min(dataEnd, this.start + this.minEdgeWidth * 1000);
+        } else {
+          this.start = dataStart;
+          this.stop = Math.min(dataEnd, dataStart + this.minEdgeWidth * 1000);
+        }
         if (this.stop <= this.start) {
           this.stop = dataStart + Math.max(this.minEdgeWidth * 1000, EPS);
         }
