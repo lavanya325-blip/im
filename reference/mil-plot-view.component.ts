@@ -1179,9 +1179,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         this.updatePlot();
         break;
       case 'cursor':
-        this.disableEvents();
-        this.activeTool = 'cursor';
-        this.cursorEnabled = true;
+        this.onCursorEnableClick(this.cursorPlane?.Model, event);
         break;
       case 'select':
         this.activeTool = 'select';
