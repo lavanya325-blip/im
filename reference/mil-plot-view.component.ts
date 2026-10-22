@@ -16,6 +16,9 @@ import {
 import { CommonModule } from '@angular/common';
 import { MatIconModule } from '@angular/material/icon';
 import { PlotGrid } from './components/plot-grid/plot-grid-component';
+import { CursorPlane } from './components/cursor-plane/cursor-plane-component';
+import { CursorModel } from './models/cursor.model';
+import { CursorPlaneModel } from './models/cursor-plane.model';
 import { MatDialog } from '@angular/material/dialog';
 import * as d3 from 'd3';
 import { Mutex } from 'async-mutex';
@@ -128,7 +131,7 @@ declare const PubSub: {
 @Component({
   selector: 'app-plot-view',
   standalone: true,
-  imports: [CommonModule, MatIconModule, PlotGrid],
+  imports: [CommonModule, MatIconModule, PlotGrid, CursorPlane],
   templateUrl: './plot-view.component.html',
   styleUrl: './plot-view.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush
@@ -137,6 +140,7 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
   @ViewChild('plotCapture') plotCapture?: ElementRef<HTMLElement>;
   @ViewChild('waveformContainer') waveformContainer?: ElementRef<HTMLElement>;
   @ViewChild('waveformsvg', { static: true }) waveformsvg!: ElementRef<SVGElement>;
+  @ViewChild('cursorPlane') cursorPlane?: CursorPlane;
   private waveformSVG_Padding!: Padding;
   private pubSubTokens: string[] = [];
 
@@ -165,15 +169,16 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
 
   readonly tools: { id: string; icon: string; label: string; order: number }[] = [
     { id: 'snapshot', icon: 'camera_alt', label: 'Camera', order: 0 },
-    { id: 'expand', icon: 'open_in_full', label: 'Expand', order: 1 },
+    { id: 'expand', icon: 'fullscreen', label: 'Expand', order: 1 },
     { id: 'select', icon: 'mouse', label: 'Mouse', order: 2 },
     { id: 'zoomIn', icon: 'zoom_in', label: 'Zoom in', order: 3 },
     { id: 'zoomOut', icon: 'zoom_out', label: 'Zoom out', order: 4 },
     { id: 'pan', icon: 'pan_tool', label: 'Pan', order: 5 },
     { id: 'move', icon: 'open_with', label: 'Drag pan', order: 6 },
-    { id: 'fit', icon: 'calendar_month', label: 'Fit', order: 7 },
+    { id: 'fit', icon: 'open_in_full', label: 'Fit', order: 7 },
     { id: 'grid', icon: 'grid_3x3', label: 'Grid', order: 8 },
-    { id: 'bits', icon: 'table_chart', label: 'Bits', order: 9 }
+    { id: 'bits', icon: 'table_chart', label: 'Bits', order: 9 },
+    { id: 'cursor', icon: 'height', label: 'Vertical Cursors', order: 10 }
   ];
 
   hasData = false;
@@ -417,10 +422,19 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
         case CommonTypes_pb.SystemStates.CleanupRun:
         case CommonTypes_pb.SystemStates.Ready:
           this.resetRunState();
+          if (this.cursorPlane?.Model) {
+            this.cursorPlane.Model.Enabled = false;
+          }
+          this.cursorEnabled = false;
           this.resizePlot();
           break;
       }
     }));
+
+    this.cursorPlane?.Model.onChanged$.subscribe(() => {
+      this.cursorEnabled = !!this.cursorPlane?.Model.Enabled;
+      this.cdr.detectChanges();
+    });
 
     try {
       this.imageCaptureSub = this.imageSession?.captureRequest$.subscribe(
