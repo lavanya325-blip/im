@@ -1313,13 +1313,34 @@ export class PlotViewComponent implements AfterViewInit, OnDestroy, OnChanges {
       return;
     }
 
-    const begin = this.edgeAvailableResponse?.StartTime ?? this.fullDomain[0];
-    const end = this.edgeAvailableResponse?.EndTime ?? this.fullDomain[1];
+    const bounds = this.getTraceBounds();
+    const begin = bounds?.start ?? this.fullDomain[0];
+    const end = bounds?.end ?? this.fullDomain[1];
     void this.GotoTime(begin, end);
   }
 
-  onCursorEnableClick(_model: unknown, event?: Event): void {
-    this.onTool('cursor', event);
+  onCursorEnableClick(cursorPlane?: CursorPlaneModel, event?: Event): void {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (!cursorPlane || !this.scalesReady || !cursorPlane.Scale) {
+      return;
+    }
+    cursorPlane.Enabled = !cursorPlane.Enabled;
+    this.cursorEnabled = cursorPlane.Enabled;
+    this.cdr.markForCheck();
+  }
+
+  async GotoCursor(cursor: CursorModel): Promise<void> {
+    if (!cursor.Enabled || cursor.CursorPosition == null) {
+      return;
+    }
+    const diff = this.stop - this.start;
+    this.start = cursor.CursorPosition - diff / 2;
+    this.stop = this.start + diff;
+    await this.cleanWaveformData();
+    await this.downloadRequiredData();
+    this.resizePlot();
+    this.cdr.detectChanges();
   }
 
   onEnableGrid(event: Event): void {
