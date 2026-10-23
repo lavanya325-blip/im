@@ -1,0 +1,66 @@
+<div mat-dialog-title class="dialog-title">
+  <div>About Software</div>
+  <div>
+    <button mat-icon-button mat-dialog-close class="close-button" (click)="onNoClick()">
+      <mat-icon>close</mat-icon>
+    </button>
+  </div>
+</div>
+
+<div mat-dialog-content class="modal-width">
+  <div class="text-center">
+    <img src="./logo.png" alt="Image" width="170" height="34" />
+  </div>
+  <div class="company-title-about">{{ ProductName }}</div>
+  <div class="version-info">
+    <div>
+      <span class="title">Software Version: </span>
+      <span class="value">{{ version }}</span>
+    </div>
+    <div>
+      <span class="title">Firmware Version: </span>
+      <span class="value">{{ HWVersion }}</span>
+    </div>
+  </div>
+  <div class="license-info mt-30">
+    <div>
+      <span class="title">This Product is licenced to </span>
+      <span class="value">Prodigy Technovations Pvt Ltd</span>
+    </div>
+    <div
+      style="display: flex; gap: 5px; align-items: center; padding-left: 20px; size: 10px;"
+    >
+      <a href="https://www.linkedin.com/company/prodigy-technovations/" target="_blank">
+        <img src="assets/images/icons8-LinkedIn.png" alt="LinkedIn Icon" />
+      </a>
+
+      <a href="https://www.facebook.com/prodigytechnovations/" target="_blank">
+        <img src="assets/images/icons8-facebook-48.png" alt="Facebook Icon" />
+      </a>
+
+      <a href="https://www.instagram.com/prodigytechnovations/" target="_blank">
+        <img src="assets/images/icons8-instagram-logo-48.png" alt="Instagram Icon" />
+      </a>
+
+      <a href="https://www.youtube.com/c/ProdigyTechnovations" target="_blank">
+        <img src="assets/images/icons8-youtube-logo-48.png" alt="YouTube Icon" />
+      </a>
+
+      <a
+        href="https://mail.google.com/mail/?view=cm&fs=1&to=contact@prodigytechno.com"
+        target="_blank"
+      >
+        <img src="assets/images/mail.png" alt="Mail Icon" />
+      </a>
+
+      <a href="https://www.prodigytechno.com/" target="_blank">
+        <img src="assets/images/global.png" alt="Website Icon" />
+      </a>
+
+      <a href="https://x.com/prodigytechno" target="_blank">
+        <img src="assets/images/twitter.png" alt="Twitter/X Icon" />
+      </a>
+    </div>
+  </div>
+  <div class="text-center mt-30">Copyright (C) 2017, Prodigy Technovations Pvt Ltd</div>
+</div>
