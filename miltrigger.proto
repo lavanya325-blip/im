@@ -1,0 +1,126 @@
+syntax = "proto3";
+
+import "CommonTypes.proto";
+
+package MILTrigger;
+
+option csharp_namespace = "Prodigy.Devices.Expd.MIL1553.Protos";
+
+// Top-level device / sidebar configuration (MIL 1553 Configuration panel).
+message DeviceConfiguration_MIL1553 {
+  repeated BusSource SelectedBuses = 1;
+  repeated CommonTypes.Channels EnabledChannels = 2;
+
+  TriggerConfiguration_MIL1553 TriggerConfiguration = 3;
+  AcquisitionConfiguration Acquisition = 4;
+  ImportConfiguration ImportSettings = 5;
+  DisplayViewType DisplayView = 6;
+}
+
+message TriggerConfiguration_MIL1553 {
+  CommonTypes.TriggerType TriggerType = 1;
+
+  oneof TriggerConfigType {
+    AutoTriggerConfig Auto = 2;
+    ProtocolTriggerConfig_MIL1553 Protocol = 3;
+    TimingTriggerConfig Timing = 4;
+    EdgeTriggerConfig Edge = 5;
+  };
+}
+
+// Protocol Trigger — CMD / DATA / STATUS tabs (Figma).
+message ProtocolTriggerConfig_MIL1553 {
+  string SelectedTab = 1;
+
+  oneof ProtocolTriggerTabType {
+    CommandWordTrigger CMD = 2;
+    DataWordTrigger DATA = 3;
+    StatusWordTrigger STATUS = 4;
+  };
+}
+
+message CommandWordTrigger {
+  optional string RemoteTerminalAddress = 1;
+  optional string TransmitReceive = 2;
+  optional string SubaddressOrMode = 3;
+  optional string DataCountOrModeCode = 4;
+}
+
+message DataWordTrigger {
+  optional string Data = 1;
+}
+
+message StatusWordTrigger {
+  optional string RemoteTerminalAddress = 1;
+  optional string TransmitReceive = 2;
+  optional string SubaddressOrMode = 3;
+  optional string Status = 4;
+}
+
+message TimingTriggerConfig {
+  TimingCondition IntermessageTime = 1;
+  TimingCondition IdleBusDuration = 2;
+  TimingCondition ResponseTime = 3;
+}
+
+message TimingCondition {
+  CommonTypes.ComparisonOperator Operator = 1;
+  double Value = 2;
+  TimeUnit Unit = 3;
+}
+
+message EdgeTriggerConfig {
+  CommonTypes.Channels SourceChannel = 1;
+  EdgeType Edge = 2;
+  string SourceSelection = 3;
+}
+
+message AutoTriggerConfig {}
+
+message AcquisitionConfiguration {
+  AcquisitionMode Mode = 1;
+
+  optional TimingCondition TotalDuration = 2;
+  optional TimingCondition CircularBufferDuration = 3;
+  optional int32 TriggerPositionPercent = 4;
+}
+
+message ImportConfiguration {
+  string ImportLabelFilePath = 1;
+  string EditLabelFilePath = 2;
+  string ImportDatabasePath = 3;
+}
+
+enum BusSource {
+  BUS_SOURCE_UNSPECIFIED = 0;
+  BUS_A = 1;
+  BUS_B = 2;
+}
+
+enum EdgeType {
+  EDGE_TYPE_UNSPECIFIED = 0;
+  RISING = 1;
+  FALLING = 2;
+  BOTH = 3;
+}
+
+enum TimeUnit {
+  TIME_UNIT_UNSPECIFIED = 0;
+  MICROSECONDS = 1;
+  MILLISECONDS = 2;
+  SECONDS = 3;
+}
+
+enum AcquisitionMode {
+  ACQUISITION_MODE_UNSPECIFIED = 0;
+  FREE_RUN = 1;
+  TIME_BOUND = 2;
+  CIRCULAR = 3;
+}
+
+enum DisplayViewType {
+  DISPLAY_VIEW_UNSPECIFIED = 0;
+  TIMING_PLOT_AND_LISTING = 1;
+  LISTING_WINDOW = 2;
+  TIMING = 3;
+}
