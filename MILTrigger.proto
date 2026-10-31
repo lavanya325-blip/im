@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+import "CommonTypes.proto";
+
+package MILTrigger;
+
+option csharp_namespace = "Prodigy.Devices.Expd.MIL1553.Protos";
+
+message ProtocolTriggerConfig_MIL1553 {
+  CommonTypes.TriggerType TriggerType = 1;
+
+  oneof TriggerConfigType {
+    AutoTriggerConfig Auto = 2;
+    ProtocolTriggerCommand Protocol = 3;
+    TimingTriggerConfig Timing = 4;
+    EdgeTriggerConfig Edge = 5;
+  };
+}
+
+message ProtocolTriggerCommand {
+  string SelectedTab = 1;
+
+  oneof ProtocolTriggerTabType {
+    CommandWordTrigger CMD = 2;
+    DataWordTrigger DATA = 3;
+    StatusWordTrigger STATUS = 4;
+  };
+}
+
+message CommandWordTrigger {
+  optional string RemoteTerminalAddress = 1;
+  optional string TransmitReceive = 2;
+  optional string SubaddressOrMode = 3;
+  optional string DataCountOrModeCode = 4;
+}
+
+message DataWordTrigger {
+  optional string Data = 1;
+}
+
+message StatusWordTrigger {
+  optional string RemoteTerminalAddress = 1;
+  optional string TransmitReceive = 2;
+  optional string SubaddressOrMode = 3;
+  optional string Status = 4;
+}
+
+message TimingTriggerConfig {
+  TimingCondition IntermessageTime = 1;
+  TimingCondition IdleBusDuration = 2;
+  TimingCondition ResponseTime = 3;
+}
+
+message TimingCondition {
+  CommonTypes.ComparisonOperator Operator = 1;
+  double Value = 2;
+  TimeUnit Unit = 3;
+}
+
+message EdgeTriggerConfig {
+  CommonTypes.Channels SourceChannel = 1;
+  EdgeType Edge = 2;
+  string SourceSelection = 3;
+}
+
+message AutoTriggerConfig {}
+
+enum EdgeType {
+  EDGE_TYPE_UNSPECIFIED = 0;
+  RISING = 1;
+  FALLING = 2;
+  BOTH = 3;
+}
+
+enum TimeUnit {
+  TIME_UNIT_UNSPECIFIED = 0;
+  MICROSECONDS = 1;
+  MILLISECONDS = 2;
+  SECONDS = 3;
+}
